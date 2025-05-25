@@ -5,6 +5,7 @@ function App() {
     <div className="app">
       <header className="header">
         <h1>Geopins 🌍</h1>
+        <p className="subtitle">First live version deployed</p>
       </header>
       <main className="main">
         <div className="map-placeholder">
@@ -15,4 +16,4 @@ function App() {
   )
 }
 
-export default App 
+export default App
