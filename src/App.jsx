@@ -79,31 +79,25 @@ const isInVisibleViewport = (latLng, map) => {
          point.y <= actualHeight;
 };
 
-// Create custom divIcon for ranked markers
-const createRankIcon = (rank, collisionRadius = 25) => {
-  const rankLength = rank.toString().length;
-  return L.divIcon({
-    className: 'rank-marker',
+// Update createRankIcon to use category images
+const createCategoryIcon = (category, severity, verified, zoom) => {
+  const zoomClass = zoom <= 4 ? 'far' : zoom <= 8 ? 'medium' : 'close';
+  const severityClass = `severity-${severity}`;
+  const verifiedClass = verified ? 'verified' : '';
+  
+  const iconConfig = {
+    className: `category-marker-wrapper zoom-level-${zoomClass} ${severityClass} ${verifiedClass}`,
     html: `
-      <div class="rank-number" data-rank-length="${rankLength}">
-        ${rank}
-        <svg class="collision-zone" width="${collisionRadius * 2}" height="${collisionRadius * 2}" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);">
-          <circle 
-            cx="${collisionRadius}" 
-            cy="${collisionRadius}" 
-            r="${collisionRadius - 1}"
-            fill="none"
-            stroke="rgba(255, 0, 0, 0.3)"
-            stroke-width="1"
-            stroke-dasharray="4,4"
-          />
-        </svg>
+      <div class="category-marker">
+        <img src="/images/categories/${category}.svg" alt="${category}" />
       </div>
     `,
-    iconSize: [30, 30],
-    iconAnchor: [15, 30],
-    popupAnchor: [0, -30]
-  });
+    iconSize: [40, 40],
+    iconAnchor: [20, 20],
+    popupAnchor: [0, -20]
+  };
+  
+  return L.divIcon(iconConfig);
 };
 
 // Add rank tier configuration
@@ -766,12 +760,25 @@ function EventModal({ event, onClose }) {
   );
 }
 
-// Update the marker creation to include tooltips
+// Update EventMarker component
 function EventMarker({ event, onClick }) {
+  const map = useMap();
+  const [zoom, setZoom] = useState(map.getZoom());
+
+  useEffect(() => {
+    const updateZoom = () => {
+      setZoom(map.getZoom());
+    };
+    map.on('zoomend', updateZoom);
+    return () => {
+      map.off('zoomend', updateZoom);
+    };
+  }, [map]);
+
   return (
     <Marker 
       position={event.coordinates}
-      icon={createRankIcon(event.rank, event.collisionRadius)}
+      icon={createCategoryIcon(event.category, event.severity, event.verified, zoom)}
       eventHandlers={{
         click: () => onClick(event)
       }}
