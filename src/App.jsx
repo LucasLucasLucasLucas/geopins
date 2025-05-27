@@ -80,16 +80,16 @@ const isInVisibleViewport = (latLng, map) => {
 };
 
 // Update createRankIcon to use category images
-const createCategoryIcon = (category, severity, verified, zoom) => {
+const createCategoryIcon = (category, severity, verified, zoom, rank) => {
   const zoomClass = zoom <= 4 ? 'far' : zoom <= 8 ? 'medium' : 'close';
   const severityClass = `severity-${severity}`;
-  const verifiedClass = verified ? 'verified' : '';
   
   const iconConfig = {
-    className: `category-marker-wrapper zoom-level-${zoomClass} ${severityClass} ${verifiedClass}`,
+    className: `category-marker-wrapper zoom-level-${zoomClass} ${severityClass}`,
     html: `
       <div class="category-marker">
         <img src="/images/categories/${category}.svg" alt="${category}" />
+        <span class="rank-number">${rank}</span>
       </div>
     `,
     iconSize: [40, 40],
@@ -778,7 +778,7 @@ function EventMarker({ event, onClick }) {
   return (
     <Marker 
       position={event.coordinates}
-      icon={createCategoryIcon(event.category, event.severity, event.verified, zoom)}
+      icon={createCategoryIcon(event.category, event.severity, event.verified, zoom, event.rank)}
       eventHandlers={{
         click: () => onClick(event)
       }}
