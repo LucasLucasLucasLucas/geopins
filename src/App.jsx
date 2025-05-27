@@ -83,9 +83,10 @@ const isInVisibleViewport = (latLng, map) => {
 const createCategoryIcon = (category, severity, verified, zoom, rank) => {
   const zoomClass = zoom <= 4 ? 'far' : zoom <= 8 ? 'medium' : 'close';
   const severityClass = `severity-${severity}`;
+  const verifiedClass = verified ? 'verified' : ''; // Keep this for potential future use in tooltips
   
   const iconConfig = {
-    className: `category-marker-wrapper zoom-level-${zoomClass} ${severityClass}`,
+    className: `category-marker-wrapper zoom-level-${zoomClass} ${severityClass} ${verifiedClass}`,
     html: `
       <div class="category-marker">
         <img src="/images/categories/${category}.svg" alt="${category}" />
@@ -792,7 +793,10 @@ function EventMarker({ event, onClick }) {
       >
         <div className="tooltip-content">
           <strong>{event.title}</strong>
-          <p>Breaking news: A significant development has occurred in this region. Click for full details.</p>
+          <p>
+            Breaking news: A significant development has occurred in this region. Click for full details.
+            {event.verified && <span className="verified-tag">✓ Verified</span>}
+          </p>
         </div>
       </Tooltip>
     </Marker>

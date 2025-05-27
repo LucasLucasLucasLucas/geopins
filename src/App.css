@@ -391,6 +391,14 @@ body,
   transition: width 0.3s ease, height 0.3s ease;
 }
 
+/* Tooltip Styles */
+.verified-tag {
+  display: inline-block;
+  margin-left: 6px;
+  color: #2ecc71;
+  font-weight: 600;
+}
+
 /* Category Marker Styles */
 .category-marker {
   border-radius: 50%;
