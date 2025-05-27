@@ -83,15 +83,15 @@ const isInVisibleViewport = (latLng, map) => {
 const createCategoryIcon = (category, severity, verified, zoom, rank) => {
   const zoomClass = zoom <= 4 ? 'far' : zoom <= 8 ? 'medium' : 'close';
   const severityClass = `severity-${severity}`;
-  const verifiedClass = verified ? 'verified' : ''; // Keep this for potential future use in tooltips
+  const verifiedClass = verified ? 'verified' : '';
   
   const iconConfig = {
     className: `category-marker-wrapper zoom-level-${zoomClass} ${severityClass} ${verifiedClass}`,
     html: `
       <div class="category-marker">
         <img src="/images/categories/${category}.svg" alt="${category}" />
-        <span class="rank-number">${rank}</span>
       </div>
+      <div class="rank-banner">#${rank}</div>
     `,
     iconSize: [40, 40],
     iconAnchor: [20, 20],
