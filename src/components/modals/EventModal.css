@@ -1,0 +1,115 @@
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal-content {
+  background: white;
+  border-radius: 8px;
+  padding: 24px;
+  width: 90%;
+  max-width: 600px;
+  max-height: 90vh;
+  overflow-y: auto;
+  position: relative;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.modal-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  background: none;
+  border: none;
+  font-size: 24px;
+  cursor: pointer;
+  color: #666;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: background-color 0.2s;
+}
+
+.modal-close:hover {
+  background-color: #f0f0f0;
+}
+
+.modal-header {
+  margin-bottom: 24px;
+}
+
+.modal-header h2 {
+  margin: 0 0 16px;
+  color: #1a73e8;
+  font-size: 1.8em;
+  padding-right: 32px;
+}
+
+.event-meta {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.verified-badge,
+.severity-badge,
+.category-badge {
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 0.9em;
+  font-weight: 500;
+}
+
+.verified-badge {
+  background-color: #e6f4ea;
+  color: #1e8e3e;
+}
+
+.severity-badge {
+  background-color: #fce8e6;
+  color: #d93025;
+}
+
+.severity-badge.severity-1 { background-color: #e8f0fe; color: #1a73e8; }
+.severity-badge.severity-2 { background-color: #e6f4ea; color: #1e8e3e; }
+.severity-badge.severity-3 { background-color: #fef7e0; color: #f9ab00; }
+.severity-badge.severity-4 { background-color: #fce8e6; color: #ea4335; }
+.severity-badge.severity-5 { background-color: #fce8e6; color: #d93025; }
+
+.category-badge {
+  background-color: #f1f3f4;
+  color: #5f6368;
+}
+
+.modal-body {
+  color: #3c4043;
+}
+
+.event-details {
+  margin-bottom: 24px;
+  padding-bottom: 24px;
+  border-bottom: 1px solid #e8eaed;
+}
+
+.event-details p {
+  margin: 8px 0;
+}
+
+.event-description h3 {
+  margin: 0 0 12px;
+  color: #202124;
+  font-size: 1.2em;
+}
+
+.event-description p {
+  margin: 0;
+  line-height: 1.5;
+  color: #5f6368;
+} 

@@ -1,0 +1,67 @@
+.filter-panel {
+  background: white;
+  padding: 20px;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  width: 300px;
+  max-height: calc(100vh - 100px);
+  overflow-y: auto;
+}
+
+.filter-panel h2 {
+  margin: 0 0 20px;
+  color: #1a73e8;
+  font-size: 1.5em;
+}
+
+.filter-section {
+  margin-bottom: 24px;
+}
+
+.filter-section h3 {
+  margin: 0 0 12px;
+  font-size: 1.1em;
+  color: #333;
+}
+
+.filter-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.filter-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  transition: background-color 0.2s;
+}
+
+.filter-option:hover {
+  background-color: #f0f4f8;
+}
+
+.filter-option input[type="checkbox"],
+.filter-option input[type="radio"] {
+  margin: 0;
+  cursor: pointer;
+}
+
+.range-input {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.range-input input[type="range"] {
+  width: 100%;
+  margin: 8px 0;
+}
+
+.range-input span {
+  color: #666;
+  font-size: 0.9em;
+} 

@@ -7,6 +7,10 @@ import './App.css'
 import L from 'leaflet'
 import icon from 'leaflet/dist/images/marker-icon.png'
 import iconShadow from 'leaflet/dist/images/marker-shadow.png'
+import EventModal from './components/modals/EventModal.jsx'
+import EventMarker from './components/markers/EventMarker.jsx'
+import EventHandler from './components/map/EventHandler.jsx'
+import FilterPanel from './components/filters/FilterPanel.jsx'
 
 // Configure default marker icon
 const defaultIcon = L.icon({
@@ -897,159 +901,6 @@ function DateFilter({ activeTimeRange, onTimeRangeChange }) {
         </div>
       </div>
     </div>
-  );
-}
-
-// Update FilterPanel component to remove the slider
-function FilterPanel({ events, activeFilters, onFilterChange, activeTimeRange, onTimeRangeChange, topVisibleCount, onTopVisibleCountChange }) {
-  // Extract unique values for each filter type
-  const filterOptions = useMemo(() => ({
-    categories: [...new Set(events.map(event => event.category))],
-    severities: [...new Set(events.map(event => event.severity))],
-  }), [events]);
-
-  return (
-    <div className="filter-panel">
-      <DateFilter 
-        activeTimeRange={activeTimeRange}
-        onTimeRangeChange={onTimeRangeChange}
-      />
-      
-      <div className="filter-section">
-        <h3>Categories</h3>
-        {filterOptions.categories.map(category => (
-          <label key={category} className="filter-option">
-            <input
-              type="checkbox"
-              checked={activeFilters.categories.includes(category)}
-              onChange={(e) => {
-                const isChecked = e.target.checked;
-                onFilterChange('categories', category, isChecked);
-              }}
-            />
-            {category.charAt(0).toUpperCase() + category.slice(1)}
-          </label>
-        ))}
-      </div>
-
-      <div className="filter-section">
-        <h3>Severity</h3>
-        {filterOptions.severities.map(severity => (
-          <label key={severity} className="filter-option">
-            <input
-              type="checkbox"
-              checked={activeFilters.severities.includes(severity)}
-              onChange={(e) => {
-                const isChecked = e.target.checked;
-                onFilterChange('severities', severity, isChecked);
-              }}
-            />
-            {severity.charAt(0).toUpperCase() + severity.slice(1)}
-          </label>
-        ))}
-      </div>
-
-      <div className="filter-section">
-        <h3>Status</h3>
-        <label className="filter-option">
-          <input
-            type="checkbox"
-            checked={activeFilters.verified}
-            onChange={(e) => {
-              onFilterChange('verified', 'verified', e.target.checked);
-            }}
-          />
-          Verified Only
-        </label>
-      </div>
-    </div>
-  );
-}
-
-// Modal component for detailed event view
-function EventModal({ event, onClose }) {
-  if (!event) return null;
-
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content" onClick={e => e.stopPropagation()}>
-        <button className="modal-close" onClick={onClose}>&times;</button>
-        
-        <div className="modal-image-placeholder">
-          <div className="placeholder-text">News Image</div>
-        </div>
-        
-        <div className="modal-body">
-          <h2>{event.title}</h2>
-          
-          <div className="event-metadata">
-            <span className="category">{event.category}</span>
-            <span className="date">{new Date(event.timestamp).toLocaleDateString()}</span>
-            {event.verified && <span className="verified">✓ Verified</span>}
-          </div>
-          
-          <div className="event-tags">
-            {event.tags.map(tag => (
-              <span key={tag} className="tag">#{tag}</span>
-            ))}
-          </div>
-          
-          <div className="article-content">
-            <p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris.</p>
-            
-            <p>Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.</p>
-            
-            <p>Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium, totam rem aperiam, eaque ipsa quae ab illo inventore veritatis et quasi architecto beatae vitae dicta sunt explicabo.</p>
-          </div>
-          
-          <div className="event-source">
-            Source: <strong>{event.source}</strong>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// Update EventMarker component
-function EventMarker({ event, onClick }) {
-  const map = useMap();
-  const [zoom, setZoom] = useState(map.getZoom());
-
-  useEffect(() => {
-    const updateZoom = () => {
-      setZoom(map.getZoom());
-    };
-    map.on('zoomend', updateZoom);
-    return () => {
-      map.off('zoomend', updateZoom);
-    };
-  }, [map]);
-
-  return (
-    <Marker 
-      position={event.coordinates}
-      icon={createCategoryIcon(event.category, event.severity, event.verified, zoom, event.rank, event.sizeTier)}
-      eventHandlers={{
-        click: () => onClick(event)
-      }}
-    >
-      <Tooltip 
-        direction="top" 
-        offset={[0, -20]}
-        opacity={1}
-        permanent={false}
-        className="event-tooltip"
-      >
-        <div className="tooltip-content">
-          <strong>{event.title}</strong>
-          <p>
-            Breaking news: A significant development has occurred in this region. Click for full details.
-            {event.verified && <span className="verified-tag">✓ Verified</span>}
-          </p>
-        </div>
-      </Tooltip>
-    </Marker>
   );
 }
 
