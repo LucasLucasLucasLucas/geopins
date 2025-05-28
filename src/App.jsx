@@ -20,38 +20,88 @@ L.Marker.prototype.options.icon = defaultIcon;
 
 // Constants for decluttering
 const MIN_TOP_EVENTS = 5;
-const MAX_TOP_EVENTS = 100;
+const MAX_TOP_EVENTS = 300; // Changed from 10000 to 300
 const MIN_PIXEL_DISTANCE = 25; // Reduced from 40px to better match visual overlap
+const DEFAULT_VISIBLE_EVENTS = 300; // Changed from 10000 to 300
 const DEBUG_MODE = true; // Enable collision zone visualization
 
-// Update collision distance configuration with much smaller distances
+// Calculate marker size based on zoom level and tier
+const getMarkerSize = (zoom, sizeTier = 'normal') => {
+  // Base size calculation based on zoom
+  let baseSize;
+  if (zoom <= 3) {
+    baseSize = 20;  // Increased from 16 for better visibility at global view
+  } else if (zoom <= 6) {
+    baseSize = 24;  // Increased from 20 for better visibility at regional view
+  } else {
+    baseSize = 28;  // Increased from 24 for better visibility at local view
+  }
+  
+  // Apply size multipliers based on tier with more pronounced differences
+  const sizeMultipliers = {
+    top: 2.0,    // Increased from 1.5x to 2.0x for top 5 visible
+    high: 1.5,   // Increased from 1.25x to 1.5x for next 10 visible
+    normal: 1.0   // Base size for regular events
+  };
+  
+  return Math.round(baseSize * (sizeMultipliers[sizeTier] || 1.0));
+};
+
+// Update collision distance configuration to account for marker sizes
 const COLLISION_CONFIG = {
-  // Base collision distances
-  baseDistance: 5,     // Maximum collision distance at lowest zoom
-  minDistance: 3,      // Minimum collision distance at highest zoom
+  // Base collision distances for different zoom levels
+  baseDistance: 10,    // Reduced from 15 to show more events
+  minDistance: 5,      // Reduced from 8 to show more events
+  
+  // Size multipliers for different tiers
+  sizeMultipliers: {
+    top: 1.5,    // Reduced from 2.0 to allow more events nearby
+    high: 1.2,   // Reduced from 1.5 to allow more events nearby
+    normal: 1.0  // Regular events
+  },
+  
+  // Additional padding between markers
+  padding: {
+    top: 5,     // Reduced from 10
+    high: 4,     // Reduced from 8
+    normal: 3    // Reduced from 5
+  },
   
   // Zoom level breakpoints
   startZoom: 2,
   endZoom: 15,
   
-  // Linear scaling between zoom levels
-  getCollisionDistance: (zoom) => {
-    const clampedZoom = Math.min(Math.max(zoom, COLLISION_CONFIG.startZoom), COLLISION_CONFIG.endZoom);
-    const zoomProgress = (clampedZoom - COLLISION_CONFIG.startZoom) / 
+  // Get collision distance based on marker size and zoom
+  getCollisionDistance: (zoom, sizeTier = 'normal') => {
+    // Get the actual marker size
+    const markerSize = getMarkerSize(zoom, sizeTier);
+    
+    // Calculate base collision distance scaled by zoom
+    const zoomProgress = (Math.min(Math.max(zoom, COLLISION_CONFIG.startZoom), COLLISION_CONFIG.endZoom) - COLLISION_CONFIG.startZoom) / 
       (COLLISION_CONFIG.endZoom - COLLISION_CONFIG.startZoom);
     
-    return Math.round(
-      COLLISION_CONFIG.baseDistance - 
-      (zoomProgress * (COLLISION_CONFIG.baseDistance - COLLISION_CONFIG.minDistance))
-    );
+    const baseDistance = COLLISION_CONFIG.baseDistance - 
+      (zoomProgress * (COLLISION_CONFIG.baseDistance - COLLISION_CONFIG.minDistance));
+    
+    // Apply size multiplier and padding
+    const multiplier = COLLISION_CONFIG.sizeMultipliers[sizeTier] || 1.0;
+    const padding = COLLISION_CONFIG.padding[sizeTier] || 0;
+    
+    // Final distance is based on marker size plus scaled padding
+    return Math.round((markerSize * multiplier + padding) * 0.5); // Added 0.5 multiplier to further reduce collision distance
   }
 };
 
-// Debug helper to show distance at different zoom levels
+// Debug helper to show distance at different zoom levels for each size tier
 if (DEBUG_MODE) {
-  console.log('Collision Distance Scale:');
+  console.log('Collision Distance Scale (with realistic marker sizes):');
   for (let zoom = 2; zoom <= 15; zoom++) {
-    console.log(`Zoom ${zoom}: ${COLLISION_CONFIG.getCollisionDistance(zoom)}px`);
+    console.log(`\nZoom ${zoom}${zoom >= 6 ? ' (20% increased sensitivity)' : ''}:`);
+    Object.entries(COLLISION_CONFIG.sizeMultipliers).forEach(([tier, multiplier]) => {
+      const distance = COLLISION_CONFIG.getCollisionDistance(zoom, tier);
+      const padding = COLLISION_CONFIG.padding[tier];
+      console.log(`  ${tier.padEnd(6)}: ${distance}px (${multiplier}x multiplier + ${padding}px padding)`);
+    });
   }
 }
 
@@ -62,40 +112,51 @@ const getPixelDistance = (point1, point2, map) => {
   return Math.sqrt(Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p2.y, 2));
 };
 
-// Check if a point is within the visible viewport
+// Check if a point is within the visible viewport with buffer
 const isInVisibleViewport = (latLng, map) => {
   const point = map.latLngToContainerPoint(latLng);
-  const mapSize = map.getSize();
   
   // Get actual visible map dimensions
   const container = map.getContainer();
   const actualWidth = container.clientWidth;
   const actualHeight = container.clientHeight;
   
-  // Check if point is within the actual visible area
-  return point.x >= 0 && 
-         point.x <= actualWidth && 
-         point.y >= 0 && 
-         point.y <= actualHeight;
+  // Add buffer zones (50% of viewport size, increased from 20%)
+  const bufferX = actualWidth * 0.5;
+  const bufferY = actualHeight * 0.5;
+  
+  // Check if point is within the buffered visible area
+  return point.x >= -bufferX && 
+         point.x <= actualWidth + bufferX && 
+         point.y >= -bufferY && 
+         point.y <= actualHeight + bufferY;
 };
 
-// Update createRankIcon to use category images
-const createCategoryIcon = (category, severity, verified, zoom, rank) => {
+// Keep createCategoryIcon separate as it needs to handle both marker and banner
+const createCategoryIcon = (category, severity, verified, zoom, rank, sizeTier) => {
   const zoomClass = zoom <= 4 ? 'far' : zoom <= 8 ? 'medium' : 'close';
   const severityClass = `severity-${severity}`;
   const verifiedClass = verified ? 'verified' : '';
+  const rankTierClass = `rank-${sizeTier}`; // Ensure rank tier class is explicitly set
+  
+  // Get marker size (circular part)
+  const size = getMarkerSize(zoom, sizeTier);
+  // Banner height is additional to marker size, only for display
+  const bannerHeight = Math.round(size * 0.4);
   
   const iconConfig = {
-    className: `category-marker-wrapper zoom-level-${zoomClass} ${severityClass} ${verifiedClass}`,
+    className: `category-marker-wrapper ${zoomClass} ${severityClass} ${verifiedClass} ${rankTierClass}`,
     html: `
-      <div class="category-marker">
-        <img src="/images/categories/${category}.svg" alt="${category}" />
+      <div class="${rankTierClass}" style="position:relative;width:${size}px;height:${size + bannerHeight}px;">
+        <div class="category-marker" style="width:${size}px;height:${size}px;position:absolute;top:0;left:0;">
+          <img src="/images/categories/${category}.svg" alt="${category}" />
+        </div>
+        <div class="rank-banner" style="position:absolute;top:${size}px;left:50%;transform:translateX(-50%);">#${rank}</div>
       </div>
-      <div class="rank-banner">#${rank}</div>
     `,
-    iconSize: [40, 40],
-    iconAnchor: [20, 20],
-    popupAnchor: [0, -20]
+    iconSize: [size, size + bannerHeight],
+    iconAnchor: [size/2, size/2], // Center of the circle
+    popupAnchor: [0, -(size/2 + bannerHeight)] // Above the entire icon
   };
   
   return L.divIcon(iconConfig);
@@ -181,33 +242,32 @@ function MapEventHandler({ events, setVisibleEvents, setHiddenEvents, topVisible
   const map = useMap();
   const [mapReady, setMapReady] = useState(false);
   
-  // Memoize the update function with proper dependencies
   const updateEvents = useCallback(() => {
     if (!mapReady) return;
 
     const bounds = map.getBounds();
     const currentZoom = map.getZoom();
-    const collisionDistance = COLLISION_CONFIG.getCollisionDistance(currentZoom);
     
-    // Get all events in bounds
+    // Extend the bounds by 50% to show more events
+    const extendedBounds = bounds.pad(0.5);
+    
+    // Get all events in extended bounds
     const inBoundsEvents = events.filter(event => {
       const latLng = L.latLng(event.coordinates);
-      return bounds.contains(latLng) && isInVisibleViewport(latLng, map);
+      return extendedBounds.contains(latLng);
     });
 
     // Sort events by rank (lower rank = higher priority)
     const rankedEvents = [...inBoundsEvents].sort((a, b) => a.rank - b.rank);
     
-    // Initialize all events as potentially visible
-    const visibleEvents = new Map();
+    // Initialize arrays for visible and hidden events
+    const visibleEvents = [];
     const hiddenEvents = [];
     
-    console.log(`Processing ${rankedEvents.length} events in bounds, target: ${topVisibleCount}`);
-    
-    // First pass: Try to make all events visible within the limit
+    // Process all events
     for (const event of rankedEvents) {
-      // Stop if we've reached the visibility limit
-      if (visibleEvents.size >= topVisibleCount) {
+      // Check maximum visible events limit first
+      if (visibleEvents.length >= topVisibleCount) {
         hiddenEvents.push(event);
         continue;
       }
@@ -215,20 +275,35 @@ function MapEventHandler({ events, setVisibleEvents, setHiddenEvents, topVisible
       const eventPos = L.latLng(event.coordinates);
       let hasCollision = false;
 
+      // Determine size tier for this event based on global rank
+      const eventSizeTier = event.rank <= 5 ? 'top' : 
+                           event.rank <= 15 ? 'high' : 'normal';
+
       // Check for collisions with already placed events
-      for (const [placedId, placedEvent] of visibleEvents.entries()) {
+      for (const placedEvent of visibleEvents) {
         const distance = getPixelDistance(eventPos, L.latLng(placedEvent.coordinates), map);
         
-        // Only consider it a collision if pins are very close
-        if (distance < collisionDistance) {
-          // If we collide with a higher-ranked event, replace it
+        // Get collision distances for both events
+        const eventCollisionDistance = COLLISION_CONFIG.getCollisionDistance(currentZoom, eventSizeTier);
+        const placedCollisionDistance = COLLISION_CONFIG.getCollisionDistance(currentZoom, placedEvent.sizeTier);
+        
+        // Use the larger of the two collision distances
+        const effectiveCollisionDistance = Math.max(eventCollisionDistance, placedCollisionDistance);
+        
+        // Reduce collision distance even further based on zoom level
+        const zoomFactor = Math.max(0.3, Math.min(0.7, currentZoom / 10)); // Scale factor between 0.3 and 0.7 based on zoom
+        const adjustedDistance = effectiveCollisionDistance * zoomFactor;
+        
+        if (distance < adjustedDistance) {
           if (placedEvent.rank > event.rank) {
-            console.log(`Replacing event ${placedEvent.rank} with ${event.rank} due to better rank`);
-            visibleEvents.delete(placedId);
+            // Remove the placed event and add this one
+            visibleEvents.splice(visibleEvents.indexOf(placedEvent), 1);
             hiddenEvents.push(placedEvent);
-            visibleEvents.set(event.id, {
+            
+            visibleEvents.push({
               ...event,
-              collisionRadius: collisionDistance
+              sizeTier: eventSizeTier,
+              collisionRadius: eventCollisionDistance
             });
           } else {
             hiddenEvents.push(event);
@@ -238,39 +313,31 @@ function MapEventHandler({ events, setVisibleEvents, setHiddenEvents, topVisible
         }
       }
 
-      // If no collision and within limit, make it visible
-      if (!hasCollision && visibleEvents.size < topVisibleCount) {
-        visibleEvents.set(event.id, {
+      if (!hasCollision) {
+        visibleEvents.push({
           ...event,
-          collisionRadius: collisionDistance
+          sizeTier: eventSizeTier,
+          collisionRadius: COLLISION_CONFIG.getCollisionDistance(currentZoom, eventSizeTier)
         });
-        console.log(`Placed event ${event.rank}, total visible: ${visibleEvents.size}`);
       }
     }
 
-    // Add remaining events to hidden if we're over the limit
-    const remainingEvents = rankedEvents.slice(visibleEvents.size);
-    hiddenEvents.push(...remainingEvents);
-
-    console.log(`Final counts - Visible: ${visibleEvents.size}, Hidden: ${hiddenEvents.length}`);
-    console.log('Visible events:', Array.from(visibleEvents.values()).map(e => e.rank).sort((a, b) => a - b));
-
-    setVisibleEvents(Array.from(visibleEvents.values()));
+    setVisibleEvents(visibleEvents);
     setHiddenEvents(hiddenEvents);
-  }, [events, topVisibleCount, mapReady, map]);
+  }, [events, topVisibleCount, mapReady, map, setVisibleEvents, setHiddenEvents]);
 
-  // Initialize map
+  // Initialize map and trigger first update
   useEffect(() => {
     const checkMapReady = () => {
-      const container = map.getContainer();
-      if (container.clientWidth > 0 && container.clientHeight > 0) {
+      if (map.getContainer().clientWidth > 0 && map.getContainer().clientHeight > 0) {
         setMapReady(true);
+        updateEvents();
       } else {
         setTimeout(checkMapReady, 100);
       }
     };
     checkMapReady();
-  }, [map]);
+  }, [map, updateEvents]); // Add updateEvents to dependencies
 
   // Update on map changes
   useMapEvents({
@@ -279,21 +346,6 @@ function MapEventHandler({ events, setVisibleEvents, setHiddenEvents, topVisible
     zoomlevelschange: updateEvents,
     resize: updateEvents
   });
-
-  // Force update when topVisibleCount changes
-  useEffect(() => {
-    if (mapReady) {
-      console.log('Top visible count changed to:', topVisibleCount);
-      updateEvents();
-    }
-  }, [topVisibleCount, mapReady, updateEvents]);
-
-  // Initial update when map is ready
-  useEffect(() => {
-    if (mapReady) {
-      updateEvents();
-    }
-  }, [mapReady, updateEvents]);
 
   return null;
 }
@@ -534,6 +586,118 @@ for (let i = 0; i < 50; i++) {
   mockNewsEvents.push(event);
 }
 
+// After the Uppsala cluster generation and before the App component
+
+// Generate Stockholm cluster
+const STOCKHOLM_CENTER = [59.3293, 18.0686];
+const STOCKHOLM_CLUSTER_RADIUS = 0.15; // Slightly larger radius than Uppsala for variety
+
+// Helper function to generate a random title
+const generateStockholmTitle = () => {
+  const prefixes = ['Breaking', 'Update', 'Latest', 'New', 'Developing'];
+  const topics = ['Tech Summit', 'Cultural Event', 'Startup Launch', 'Urban Development', 'Innovation Hub', 
+                 'Green Initiative', 'Transport Update', 'City Planning', 'Research Breakthrough', 'Community Project'];
+  const locations = ['Södermalm', 'Gamla Stan', 'Norrmalm', 'Östermalm', 'Kungsholmen', 'Djurgården'];
+  
+  const prefix = prefixes[Math.floor(Math.random() * prefixes.length)];
+  const topic = topics[Math.floor(Math.random() * topics.length)];
+  const location = locations[Math.floor(Math.random() * locations.length)];
+  
+  return `${prefix}: ${topic} in ${location}`;
+};
+
+// Generate descriptions based on category
+const generateDescription = (category) => {
+  const descriptions = {
+    technology: [
+      'New tech hub opening with focus on sustainable innovation',
+      'Startup announces breakthrough in AI development',
+      'Smart city initiative launches pilot program',
+      'Tech company expands operations in Stockholm region',
+      'Innovation center hosts international tech conference'
+    ],
+    environment: [
+      'Green energy project shows promising results',
+      'Urban farming initiative expands to new locations',
+      'Climate action plan enters next phase',
+      'Sustainable transport solution implemented',
+      'Environmental study reveals positive trends'
+    ],
+    economy: [
+      'Local businesses report growth in tech sector',
+      'Economic forum discusses innovation economy',
+      'Investment in startup ecosystem increases',
+      'New economic partnership announced',
+      'Financial district welcomes tech companies'
+    ],
+    politics: [
+      'City council approves tech innovation district',
+      'Policy changes to support startup growth',
+      'Urban development plan enters new phase',
+      'International cooperation agreement signed',
+      'Local government announces tech initiatives'
+    ]
+  };
+
+  const categoryDescriptions = descriptions[category];
+  return categoryDescriptions[Math.floor(Math.random() * categoryDescriptions.length)];
+};
+
+// Generate 25 events around Stockholm
+for (let i = 0; i < 25; i++) {
+  const hoursAgo = Math.floor(Math.random() * 72); // Events within last 72 hours
+  const minutesAgo = Math.floor(Math.random() * 60);
+  
+  const timestamp = new Date();
+  timestamp.setHours(timestamp.getHours() - hoursAgo);
+  timestamp.setMinutes(timestamp.getMinutes() - minutesAgo);
+
+  // Generate coordinates with random variation around Stockholm center
+  const lat = STOCKHOLM_CENTER[0] + (Math.random() * 2 - 1) * STOCKHOLM_CLUSTER_RADIUS;
+  const lng = STOCKHOLM_CENTER[1] + (Math.random() * 2 - 1) * STOCKHOLM_CLUSTER_RADIUS;
+
+  // Select random category with weighted distribution
+  const categoryWeights = {
+    technology: 0.4,    // 40% chance
+    economy: 0.3,       // 30% chance
+    environment: 0.2,   // 20% chance
+    politics: 0.1       // 10% chance
+  };
+
+  const rand = Math.random();
+  let selectedCategory;
+  let sum = 0;
+  for (const [category, weight] of Object.entries(categoryWeights)) {
+    sum += weight;
+    if (rand <= sum) {
+      selectedCategory = category;
+      break;
+    }
+  }
+
+  // Generate rank ensuring some overlap with important events but mostly higher ranks
+  const rank = Math.random() < 0.2 ? // 20% chance for important event
+    Math.floor(Math.random() * 20) + 1 : // Rank 1-20
+    Math.floor(Math.random() * 480) + 21; // Rank 21-500
+
+  const event = {
+    id: `stockholm-${(i + 1).toString().padStart(3, '0')}`,
+    timestamp: timestamp.toISOString(),
+    title: generateStockholmTitle(),
+    coordinates: [lat, lng],
+    description: generateDescription(selectedCategory),
+    source: sources[Math.floor(Math.random() * sources.length)],
+    category: selectedCategory,
+    tags: ["stockholm", "sweden", selectedCategory],
+    severity: Math.random() < 0.3 ? 'high' : 
+             Math.random() < 0.7 ? 'medium' : 'low',
+    verified: Math.random() > 0.2, // 80% chance of being verified
+    rank: rank
+  };
+
+  mockNewsEvents.push(event);
+}
+
 // Time range presets
 const TIME_PRESETS = {
   '24h': {
@@ -629,7 +793,7 @@ function DateFilter({ activeTimeRange, onTimeRangeChange }) {
   );
 }
 
-// Update FilterPanel slider to ensure immediate updates
+// Update FilterPanel component to remove the slider
 function FilterPanel({ events, activeFilters, onFilterChange, activeTimeRange, onTimeRangeChange, topVisibleCount, onTopVisibleCountChange }) {
   // Extract unique values for each filter type
   const filterOptions = useMemo(() => ({
@@ -637,29 +801,8 @@ function FilterPanel({ events, activeFilters, onFilterChange, activeTimeRange, o
     severities: [...new Set(events.map(event => event.severity))],
   }), [events]);
 
-  const handleSliderChange = (e) => {
-    const newValue = parseInt(e.target.value);
-    console.log('Slider changed to:', newValue);
-    onTopVisibleCountChange(newValue);
-  };
-
   return (
     <div className="filter-panel">
-      <div className="filter-section">
-        <h3>Top Visible Events</h3>
-        <div className="slider-container">
-          <input
-            type="range"
-            min={MIN_TOP_EVENTS}
-            max={MAX_TOP_EVENTS}
-            value={topVisibleCount}
-            onChange={handleSliderChange}
-            className="range-slider"
-          />
-          <div className="slider-value">{topVisibleCount} events</div>
-        </div>
-      </div>
-
       <DateFilter 
         activeTimeRange={activeTimeRange}
         onTimeRangeChange={onTimeRangeChange}
@@ -779,7 +922,7 @@ function EventMarker({ event, onClick }) {
   return (
     <Marker 
       position={event.coordinates}
-      icon={createCategoryIcon(event.category, event.severity, event.verified, zoom, event.rank)}
+      icon={createCategoryIcon(event.category, event.severity, event.verified, zoom, event.rank, event.sizeTier)}
       eventHandlers={{
         click: () => onClick(event)
       }}
@@ -803,6 +946,32 @@ function EventMarker({ event, onClick }) {
   );
 }
 
+// Add ZoomDebugger component before the App component
+function ZoomDebugger() {
+  const map = useMap();
+  const [zoom, setZoom] = useState(map.getZoom());
+
+  useEffect(() => {
+    const updateZoom = () => {
+      setZoom(map.getZoom());
+    };
+
+    map.on('zoomend', updateZoom);
+    map.on('zoom', updateZoom);
+
+    return () => {
+      map.off('zoomend', updateZoom);
+      map.off('zoom', updateZoom);
+    };
+  }, [map]);
+
+  return (
+    <div className="zoom-debugger">
+      Current Zoom: {zoom.toFixed(2)}
+    </div>
+  );
+}
+
 function App() {
   const [events] = useState(mockNewsEvents);
   const [activeFilters, setActiveFilters] = useState({
@@ -813,7 +982,7 @@ function App() {
   const [activeTimeRange, setActiveTimeRange] = useState(null);
   const [visibleEvents, setVisibleEvents] = useState([]);
   const [hiddenEvents, setHiddenEvents] = useState([]);
-  const [topVisibleCount, setTopVisibleCount] = useState(20);
+  const [topVisibleCount, setTopVisibleCount] = useState(DEFAULT_VISIBLE_EVENTS);
   const [selectedEvent, setSelectedEvent] = useState(null);
 
   // Handle filter changes
@@ -881,6 +1050,7 @@ function App() {
             preferCanvas={true}
           >
             <CustomPanes />
+            <ZoomDebugger />
             <MapEventHandler 
               events={filteredEvents}
               setVisibleEvents={setVisibleEvents}
@@ -918,7 +1088,7 @@ function App() {
   );
 }
 
-// Add styles for modal and tooltip
+// Update the stylesheet to include zoom debugger styles
 const styleSheet = document.createElement("style");
 styleSheet.textContent = `
   .modal-overlay {
@@ -1093,7 +1263,22 @@ styleSheet.textContent = `
   .hidden-event-marker {
     cursor: pointer;
   }
+
+  .zoom-debugger {
+    position: absolute;
+    bottom: 20px;
+    right: 20px;
+    background: rgba(255, 255, 255, 0.9);
+    padding: 8px 12px;
+    border-radius: 4px;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+    z-index: 1000;
+    font-size: 14px;
+    font-family: monospace;
+    pointer-events: none;
+  }
 `;
+
 document.head.appendChild(styleSheet);
 
 export default App
