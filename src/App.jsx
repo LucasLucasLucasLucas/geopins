@@ -237,94 +237,209 @@ function CustomPanes() {
   return null;
 }
 
+// Visual footprint calculations
+const getMarkerFootprint = (zoom, sizeTier = 'normal') => {
+  // Get base marker size
+  const baseSize = getMarkerSize(zoom, sizeTier);
+  
+  // Calculate actual visual dimensions
+  const markerRadius = baseSize / 2;
+  const bannerHeight = Math.round(baseSize * 0.4);
+  const bannerWidth = baseSize * 1.2; // Approximate banner width
+  
+  // Account for visual effects (border, shadow, etc.)
+  const visualPadding = {
+    top: 4,    // Shadow + border
+    high: 3,   // Medium shadow + border
+    normal: 2  // Light shadow + border
+  }[sizeTier] || 2;
+  
+  return {
+    radius: markerRadius + visualPadding,
+    bannerHeight,
+    bannerWidth,
+    totalHeight: baseSize + bannerHeight,
+    visualPadding
+  };
+};
+
+// Enhanced collision detection
+const checkMarkersCollision = (event1, event2, map, currentZoom) => {
+  const pos1 = L.latLng(event1.coordinates);
+  const pos2 = L.latLng(event2.coordinates);
+  
+  // Get pixel positions
+  const pixel1 = map.latLngToContainerPoint(pos1);
+  const pixel2 = map.latLngToContainerPoint(pos2);
+  
+  // Calculate center-to-center distance
+  const distance = Math.sqrt(
+    Math.pow(pixel2.x - pixel1.x, 2) + 
+    Math.pow(pixel2.y - pixel1.y, 2)
+  );
+  
+  // Get visual footprints for both markers
+  const footprint1 = getMarkerFootprint(currentZoom, event1.sizeTier);
+  const footprint2 = getMarkerFootprint(currentZoom, event2.sizeTier);
+  
+  // Calculate minimum required distance based on visual footprints
+  const minDistance = footprint1.radius + footprint2.radius;
+  
+  // Add extra padding for banners if they overlap vertically
+  const verticalDistance = Math.abs(pixel2.y - pixel1.y);
+  if (verticalDistance < (footprint1.bannerHeight + footprint2.bannerHeight)) {
+    const bannerOverlap = Math.max(
+      (footprint1.bannerWidth + footprint2.bannerWidth) / 2,
+      minDistance
+    );
+    return distance < bannerOverlap;
+  }
+  
+  return distance < minDistance;
+};
+
+// Update size tier determination with local importance
+const determineEventTier = (event, visibleEvents, currentlyVisibleArea = null) => {
+  // Global top 5 always get top tier regardless of viewport
+  if (event.rank <= 5) {
+    return 'top';
+  }
+
+  // If we have visible area context, check for local importance
+  if (currentlyVisibleArea && visibleEvents.length > 0) {
+    // Get events that are actually in the current viewport
+    const eventsInView = visibleEvents.filter(e => 
+      currentlyVisibleArea.contains(L.latLng(e.coordinates))
+    );
+
+    // Sort by rank and get top 10 in current viewport
+    const localTop10 = eventsInView
+      .sort((a, b) => a.rank - b.rank)
+      .slice(0, 10)
+      .map(e => e.id);
+
+    // If this event is in local top 10 (but not global top 5), it gets high tier
+    if (localTop10.includes(event.id)) {
+      return 'high';
+    }
+  }
+
+  // Default to normal tier
+  return 'normal';
+};
+
 // Update MapEventHandler component
 function MapEventHandler({ events, setVisibleEvents, setHiddenEvents, topVisibleCount }) {
   const map = useMap();
   const [mapReady, setMapReady] = useState(false);
+  const [useVisualFootprint, setUseVisualFootprint] = useState(true);
   
   const updateEvents = useCallback(() => {
     if (!mapReady) return;
 
-    const bounds = map.getBounds();
-    const currentZoom = map.getZoom();
-    
-    // Extend the bounds by 50% to show more events
-    const extendedBounds = bounds.pad(0.5);
-    
-    // Get all events in extended bounds
-    const inBoundsEvents = events.filter(event => {
-      const latLng = L.latLng(event.coordinates);
-      return extendedBounds.contains(latLng);
-    });
+    try {
+      const bounds = map.getBounds();
+      const currentZoom = map.getZoom();
+      
+      // Extend the bounds for event loading
+      const extendedBounds = bounds.pad(0.5);
+      
+      // Get all events in extended bounds
+      const inBoundsEvents = events.filter(event => {
+        const latLng = L.latLng(event.coordinates);
+        return extendedBounds.contains(latLng);
+      });
 
-    // Sort events by rank (lower rank = higher priority)
-    const rankedEvents = [...inBoundsEvents].sort((a, b) => a.rank - b.rank);
-    
-    // Initialize arrays for visible and hidden events
-    const visibleEvents = [];
-    const hiddenEvents = [];
-    
-    // Process all events
-    for (const event of rankedEvents) {
-      // Check maximum visible events limit first
-      if (visibleEvents.length >= topVisibleCount) {
-        hiddenEvents.push(event);
-        continue;
-      }
+      // Sort events by rank (lower rank = higher priority)
+      const rankedEvents = [...inBoundsEvents].sort((a, b) => a.rank - b.rank);
+      
+      // Initialize arrays for visible and hidden events
+      const visibleEvents = [];
+      const hiddenEvents = [];
+      
+      // First pass: Place all events without considering collisions
+      // This helps us determine local importance before final placement
+      const preliminaryVisible = rankedEvents.slice(0, topVisibleCount).map(event => ({
+        ...event,
+        sizeTier: determineEventTier(event, rankedEvents, bounds)
+      }));
 
-      const eventPos = L.latLng(event.coordinates);
-      let hasCollision = false;
+      // Second pass: Apply collision detection with finalized size tiers
+      for (const event of preliminaryVisible) {
+        if (visibleEvents.length >= topVisibleCount) {
+          hiddenEvents.push(event);
+          continue;
+        }
 
-      // Determine size tier for this event based on global rank
-      const eventSizeTier = event.rank <= 5 ? 'top' : 
-                           event.rank <= 15 ? 'high' : 'normal';
+        let hasCollision = false;
 
-      // Check for collisions with already placed events
-      for (const placedEvent of visibleEvents) {
-        const distance = getPixelDistance(eventPos, L.latLng(placedEvent.coordinates), map);
-        
-        // Get collision distances for both events
-        const eventCollisionDistance = COLLISION_CONFIG.getCollisionDistance(currentZoom, eventSizeTier);
-        const placedCollisionDistance = COLLISION_CONFIG.getCollisionDistance(currentZoom, placedEvent.sizeTier);
-        
-        // Use the larger of the two collision distances
-        const effectiveCollisionDistance = Math.max(eventCollisionDistance, placedCollisionDistance);
-        
-        // Reduce collision distance even further based on zoom level
-        const zoomFactor = Math.max(0.3, Math.min(0.7, currentZoom / 10)); // Scale factor between 0.3 and 0.7 based on zoom
-        const adjustedDistance = effectiveCollisionDistance * zoomFactor;
-        
-        if (distance < adjustedDistance) {
-          if (placedEvent.rank > event.rank) {
-            // Remove the placed event and add this one
-            visibleEvents.splice(visibleEvents.indexOf(placedEvent), 1);
-            hiddenEvents.push(placedEvent);
-            
-            visibleEvents.push({
-              ...event,
-              sizeTier: eventSizeTier,
-              collisionRadius: eventCollisionDistance
-            });
+        // Check for collisions with already placed events
+        for (const placedEvent of visibleEvents) {
+          let collides;
+          
+          if (useVisualFootprint) {
+            collides = checkMarkersCollision(event, placedEvent, map, currentZoom);
           } else {
-            hiddenEvents.push(event);
+            const distance = getPixelDistance(
+              L.latLng(event.coordinates),
+              L.latLng(placedEvent.coordinates),
+              map
+            );
+            const eventCollisionDistance = COLLISION_CONFIG.getCollisionDistance(currentZoom, event.sizeTier);
+            const placedCollisionDistance = COLLISION_CONFIG.getCollisionDistance(currentZoom, placedEvent.sizeTier);
+            const effectiveCollisionDistance = Math.max(eventCollisionDistance, placedCollisionDistance);
+            collides = distance < effectiveCollisionDistance;
           }
-          hasCollision = true;
-          break;
+          
+          if (collides) {
+            if (placedEvent.rank > event.rank) {
+              // Remove the placed event and add this one
+              visibleEvents.splice(visibleEvents.indexOf(placedEvent), 1);
+              hiddenEvents.push(placedEvent);
+              
+              visibleEvents.push(event);
+            } else {
+              hiddenEvents.push(event);
+            }
+            hasCollision = true;
+            break;
+          }
+        }
+
+        if (!hasCollision) {
+          visibleEvents.push(event);
         }
       }
 
-      if (!hasCollision) {
-        visibleEvents.push({
-          ...event,
-          sizeTier: eventSizeTier,
-          collisionRadius: COLLISION_CONFIG.getCollisionDistance(currentZoom, eventSizeTier)
-        });
-      }
-    }
+      // Final pass: Update size tiers based on final visible set
+      const finalVisibleEvents = visibleEvents.map(event => ({
+        ...event,
+        sizeTier: determineEventTier(event, visibleEvents, bounds)
+      }));
 
-    setVisibleEvents(visibleEvents);
-    setHiddenEvents(hiddenEvents);
-  }, [events, topVisibleCount, mapReady, map, setVisibleEvents, setHiddenEvents]);
+      setVisibleEvents(finalVisibleEvents);
+      setHiddenEvents(hiddenEvents);
+    } catch (error) {
+      console.error('Error in event handling:', error);
+      setUseVisualFootprint(false);
+    }
+  }, [events, topVisibleCount, mapReady, map, setVisibleEvents, setHiddenEvents, useVisualFootprint]);
+
+  // Update marker size calculation to handle local importance
+  useEffect(() => {
+    const handleViewportChange = () => {
+      if (!mapReady) return;
+      updateEvents();
+    };
+
+    map.on('moveend', handleViewportChange);
+    map.on('zoomend', handleViewportChange);
+
+    return () => {
+      map.off('moveend', handleViewportChange);
+      map.off('zoomend', handleViewportChange);
+    };
+  }, [map, mapReady, updateEvents]);
 
   // Initialize map and trigger first update
   useEffect(() => {
@@ -337,15 +452,7 @@ function MapEventHandler({ events, setVisibleEvents, setHiddenEvents, topVisible
       }
     };
     checkMapReady();
-  }, [map, updateEvents]); // Add updateEvents to dependencies
-
-  // Update on map changes
-  useMapEvents({
-    moveend: updateEvents,
-    zoomend: updateEvents,
-    zoomlevelschange: updateEvents,
-    resize: updateEvents
-  });
+  }, [map, updateEvents]);
 
   return null;
 }
