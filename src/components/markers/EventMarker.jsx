@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Marker, Tooltip, useMap } from 'react-leaflet';
 import { markerCache } from '../../services/markerService';
 
-function EventMarker({ event, onClick }) {
+const EventMarker = React.memo(function EventMarker({ event, onClick, onHoverStart }) {
   const map = useMap();
   const [zoom, setZoom] = useState(map.getZoom());
 
@@ -27,14 +27,28 @@ function EventMarker({ event, onClick }) {
       event.rank,
       event.sizeTier
     );
-  }, [event, zoom]);
+  }, [event.category, event.severity, event.verified, zoom, event.rank, event.sizeTier]);
+
+  const tooltipContent = useMemo(() => (
+    <div className="tooltip-content">
+      <strong>{event.title}</strong>
+      <p>
+        Breaking news: A significant development has occurred in this region. Click for full details.
+        {event.verified && <span className="verified-tag">✓ Verified</span>}
+      </p>
+      <div className="score-indicator">
+        Score: {Math.round(event.currentScore || event.importanceScore)}
+      </div>
+    </div>
+  ), [event.title, event.verified, event.currentScore, event.importanceScore]);
 
   return (
     <Marker 
       position={event.coordinates}
       icon={icon}
       eventHandlers={{
-        click: () => onClick(event)
+        click: () => onClick(event),
+        mouseover: onHoverStart
       }}
     >
       <Tooltip 
@@ -44,16 +58,23 @@ function EventMarker({ event, onClick }) {
         permanent={false}
         className="event-tooltip"
       >
-        <div className="tooltip-content">
-          <strong>{event.title}</strong>
-          <p>
-            Breaking news: A significant development has occurred in this region. Click for full details.
-            {event.verified && <span className="verified-tag">✓ Verified</span>}
-          </p>
-        </div>
+        {tooltipContent}
       </Tooltip>
     </Marker>
   );
-}
+}, (prevProps, nextProps) => {
+  // Custom comparison function for React.memo
+  return (
+    prevProps.event.id === nextProps.event.id &&
+    prevProps.event.coordinates[0] === nextProps.event.coordinates[0] &&
+    prevProps.event.coordinates[1] === nextProps.event.coordinates[1] &&
+    prevProps.event.category === nextProps.event.category &&
+    prevProps.event.severity === nextProps.event.severity &&
+    prevProps.event.verified === nextProps.event.verified &&
+    prevProps.event.rank === nextProps.event.rank &&
+    prevProps.event.sizeTier === nextProps.event.sizeTier &&
+    prevProps.event.currentScore === nextProps.event.currentScore
+  );
+});
 
 export default EventMarker; 

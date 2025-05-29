@@ -11,6 +11,8 @@ import EventModal from './components/modals/EventModal.jsx'
 import EventMarker from './components/markers/EventMarker.jsx'
 import EventHandler from './components/map/EventHandler.jsx'
 import FilterPanel from './components/filters/FilterPanel.jsx'
+import CustomPanes from './components/map/CustomPanes.jsx'
+import { calculateEventRanks, determineEventTier } from './utils/eventUtils';
 
 // Configure default marker icon
 const defaultIcon = L.icon({
@@ -175,24 +177,47 @@ const RANK_TIERS = {
 };
 
 // Hidden event indicator component
-function HiddenEventIndicator({ event, onClick }) {
+function HiddenEventIndicator({ event, onClick, onHoverStart }) {
   const [showTooltip, setShowTooltip] = useState(false);
   const tooltipRef = useRef(null);
+  const markerRef = useRef(null);
+
+  const handleMouseEnter = () => {
+    setShowTooltip(true);
+    onHoverStart();
+  };
+
+  const handleMouseLeave = (e) => {
+    // Check if we're moving to the popup content
+    if (!e.relatedTarget?.closest('.leaflet-popup')) {
+      setShowTooltip(false);
+    }
+  };
 
   const handleTooltipMouseLeave = (e) => {
     // Check if we're not moving back to the marker
-    if (!e.relatedTarget?.classList.contains('hidden-event-marker')) {
+    if (!e.relatedTarget?.classList.contains('hidden-event-marker') && 
+        !e.relatedTarget?.closest('.leaflet-popup')) {
       setShowTooltip(false);
     }
   };
 
   const handleTooltipClick = () => {
     onClick(event);
+    setShowTooltip(false);
   };
+
+  // Cleanup tooltip on unmount
+  useEffect(() => {
+    return () => {
+      setShowTooltip(false);
+    };
+  }, []);
 
   return (
     <>
       <CircleMarker
+        ref={markerRef}
         center={event.coordinates}
         radius={3}
         fillColor="#000000"
@@ -200,7 +225,9 @@ function HiddenEventIndicator({ event, onClick }) {
         stroke={false}
         pane="hiddenEvents"
         eventHandlers={{
-          click: () => setShowTooltip(true)
+          click: () => setShowTooltip(true),
+          mouseenter: handleMouseEnter,
+          mouseleave: handleMouseLeave
         }}
         className="hidden-event-marker"
       />
@@ -210,6 +237,7 @@ function HiddenEventIndicator({ event, onClick }) {
           closeButton={false}
           className="hover-popup"
           ref={tooltipRef}
+          onClose={() => setShowTooltip(false)}
         >
           <div 
             className="tooltip-content"
@@ -224,21 +252,6 @@ function HiddenEventIndicator({ event, onClick }) {
       )}
     </>
   );
-}
-
-// Custom pane initialization component
-function CustomPanes() {
-  const map = useMap();
-  
-  useEffect(() => {
-    // Create custom pane for hidden events that renders below markers
-    if (!map.getPane('hiddenEvents')) {
-      map.createPane('hiddenEvents');
-      map.getPane('hiddenEvents').style.zIndex = 350; // Below markers (400) but above tiles (200)
-    }
-  }, [map]);
-  
-  return null;
 }
 
 // Visual footprint calculations
@@ -300,36 +313,6 @@ const checkMarkersCollision = (event1, event2, map, currentZoom) => {
   }
   
   return distance < minDistance;
-};
-
-// Update size tier determination with local importance
-const determineEventTier = (event, visibleEvents, currentlyVisibleArea = null) => {
-  // Global top 5 always get top tier regardless of viewport
-  if (event.rank <= 5) {
-    return 'top';
-  }
-
-  // If we have visible area context, check for local importance
-  if (currentlyVisibleArea && visibleEvents.length > 0) {
-    // Get events that are actually in the current viewport
-    const eventsInView = visibleEvents.filter(e => 
-      currentlyVisibleArea.contains(L.latLng(e.coordinates))
-    );
-
-    // Sort by rank and get top 10 in current viewport
-    const localTop10 = eventsInView
-      .sort((a, b) => a.rank - b.rank)
-      .slice(0, 10)
-      .map(e => e.id);
-
-    // If this event is in local top 10 (but not global top 5), it gets high tier
-    if (localTop10.includes(event.id)) {
-      return 'high';
-    }
-  }
-
-  // Default to normal tier
-  return 'normal';
 };
 
 // Update MapEventHandler component
@@ -461,10 +444,27 @@ function MapEventHandler({ events, setVisibleEvents, setHiddenEvents, topVisible
   return null;
 }
 
-// Mock data structure - will be replaced with API/database fetch
+// Add a unique ID generator
+let nextEventId = 1;
+const generateUniqueEventId = (prefix) => {
+  return `${prefix}-${nextEventId++}`.padStart(8, '0');
+};
+
+// Score configuration constants
+const SCORE_CONFIG = {
+  HOVER_BONUS: 5,
+  CLICK_BONUS: 10,
+  LIKE_BONUS: 25,
+  COMMENT_BONUS: 15,
+  DECAY_INTERVAL: 10000, // 10 seconds
+  DECAY_AMOUNT: 3,
+  MIN_SCORE: 0
+};
+
+// Modify the event generation to remove static ranks
 const mockNewsEvents = [
   {
-    id: '1234-5678-abcd',
+    id: generateUniqueEventId('news'),
     timestamp: new Date('2024-03-26T10:00:00Z').toISOString(),
     title: "Amsterdam Tech Hub",
     coordinates: [52.3676, 4.9041],
@@ -474,10 +474,10 @@ const mockNewsEvents = [
     tags: ["investment", "europe", "tech"],
     severity: "medium",
     verified: true,
-    rank: 3
+    importanceScore: Math.floor(Math.random() * 2000) + 1
   },
   {
-    id: '8765-4321-efgh',
+    id: generateUniqueEventId('news'),
     timestamp: new Date('2024-03-26T09:30:00Z').toISOString(),
     title: "Tokyo Climate Summit",
     coordinates: [35.6762, 139.6503],
@@ -487,10 +487,10 @@ const mockNewsEvents = [
     tags: ["climate", "policy", "international"],
     severity: "high",
     verified: true,
-    rank: 1
+    importanceScore: Math.floor(Math.random() * 2000) + 1
   },
   {
-    id: 'abcd-9012-ijkl',
+    id: generateUniqueEventId('news'),
     timestamp: new Date('2024-03-26T08:45:00Z').toISOString(),
     title: "São Paulo Economic Forum",
     coordinates: [-23.5505, -46.6333],
@@ -500,10 +500,10 @@ const mockNewsEvents = [
     tags: ["economy", "south-america", "development"],
     severity: "medium",
     verified: true,
-    rank: 4
+    importanceScore: Math.floor(Math.random() * 2000) + 1
   },
   {
-    id: '4567-mnop-8901',
+    id: generateUniqueEventId('news'),
     timestamp: new Date('2024-03-26T11:15:00Z').toISOString(),
     title: "Lake Baikal Conservation",
     coordinates: [53.5587, 108.1650],
@@ -513,10 +513,10 @@ const mockNewsEvents = [
     tags: ["conservation", "water", "siberia"],
     severity: "medium",
     verified: true,
-    rank: 5
+    importanceScore: Math.floor(Math.random() * 2000) + 1
   },
   {
-    id: 'qrst-2345-uvwx',
+    id: generateUniqueEventId('news'),
     timestamp: new Date('2024-03-26T07:20:00Z').toISOString(),
     title: "Kashmir Line of Control",
     coordinates: [34.1526, 74.3152],
@@ -526,10 +526,10 @@ const mockNewsEvents = [
     tags: ["diplomacy", "border", "asia"],
     severity: "high",
     verified: true,
-    rank: 2
+    importanceScore: Math.floor(Math.random() * 2000) + 1
   },
   {
-    id: 'event-006',
+    id: generateUniqueEventId('news'),
     timestamp: new Date('2024-03-25T15:30:00Z').toISOString(),
     title: "Silicon Valley AI Breakthrough",
     coordinates: [37.4419, -122.1430],
@@ -539,10 +539,10 @@ const mockNewsEvents = [
     tags: ["ai", "innovation", "silicon-valley"],
     severity: "high",
     verified: true,
-    rank: 6
+    importanceScore: Math.floor(Math.random() * 2000) + 1
   },
   {
-    id: 'event-007',
+    id: generateUniqueEventId('news'),
     timestamp: new Date('2024-03-24T08:15:00Z').toISOString(),
     title: "Great Barrier Reef Recovery Project",
     coordinates: [-18.2871, 147.6992],
@@ -552,10 +552,10 @@ const mockNewsEvents = [
     tags: ["coral", "conservation", "marine"],
     severity: "medium",
     verified: true,
-    rank: 15
+    importanceScore: Math.floor(Math.random() * 2000) + 1
   },
   {
-    id: 'event-008',
+    id: generateUniqueEventId('news'),
     timestamp: new Date('2024-03-23T11:45:00Z').toISOString(),
     title: "Sahara Solar Farm Launch",
     coordinates: [23.4162, 25.6628],
@@ -565,10 +565,10 @@ const mockNewsEvents = [
     tags: ["renewable", "solar", "africa"],
     severity: "high",
     verified: true,
-    rank: 8
+    importanceScore: Math.floor(Math.random() * 2000) + 1
   },
   {
-    id: 'event-009',
+    id: generateUniqueEventId('news'),
     timestamp: new Date('2024-03-22T14:20:00Z').toISOString(),
     title: "Arctic Council Emergency Meeting",
     coordinates: [78.2232, 15.6267],
@@ -578,10 +578,10 @@ const mockNewsEvents = [
     tags: ["arctic", "climate", "international"],
     severity: "high",
     verified: true,
-    rank: 7
+    importanceScore: Math.floor(Math.random() * 2000) + 1
   },
   {
-    id: 'event-010',
+    id: generateUniqueEventId('news'),
     timestamp: new Date('2024-03-21T09:10:00Z').toISOString(),
     title: "Singapore Quantum Computing Center",
     coordinates: [1.3521, 103.8198],
@@ -591,10 +591,10 @@ const mockNewsEvents = [
     tags: ["quantum", "research", "asia"],
     severity: "medium",
     verified: true,
-    rank: 12
+    importanceScore: Math.floor(Math.random() * 2000) + 1
   },
   {
-    id: 'event-105',
+    id: generateUniqueEventId('news'),
     timestamp: new Date('2024-02-26T16:45:00Z').toISOString(),
     title: "Antarctic Research Station Upgrade",
     coordinates: [-82.8628, -135.0000],
@@ -604,7 +604,7 @@ const mockNewsEvents = [
     tags: ["research", "antarctica", "climate"],
     severity: "medium",
     verified: true,
-    rank: 105
+    importanceScore: Math.floor(Math.random() * 2000) + 1
   }
 ];
 
@@ -645,7 +645,7 @@ for (let i = 0; i < remainingEventCount; i++) {
   timestamp.setMinutes(timestamp.getMinutes() - minutesAgo);
 
   const event = {
-    id: `event-${(i + 6).toString().padStart(3, '0')}`,
+    id: generateUniqueEventId('event'),
     timestamp: timestamp.toISOString(),
     title: `Event ${i + 6} Title`,
     coordinates: getRandomCoordinates(),
@@ -655,7 +655,7 @@ for (let i = 0; i < remainingEventCount; i++) {
     tags: categories.slice(0, 3).sort(() => Math.random() - 0.5),
     severity: severities[Math.floor(Math.random() * severities.length)],
     verified: Math.random() > 0.3,
-    rank: uniqueRanks[i]
+    importanceScore: Math.floor(Math.random() * 2000) + 1
   };
 
   mockNewsEvents.push(event);
@@ -681,7 +681,7 @@ for (let i = 0; i < 50; i++) {
   const lng = UPPSALA_CENTER[1] + (Math.random() * 2 - 1) * CLUSTER_RADIUS;
 
   const event = {
-    id: `uppsala-${(i + 1).toString().padStart(3, '0')}`,
+    id: generateUniqueEventId('uppsala'),
     timestamp: timestamp.toISOString(),
     title: `Uppsala Area Event ${i + 1}`,
     coordinates: [lat, lng],
@@ -691,7 +691,7 @@ for (let i = 0; i < 50; i++) {
     tags: ["uppsala", "sweden", categories[Math.floor(Math.random() * categories.length)]],
     severity: severities[Math.floor(Math.random() * severities.length)],
     verified: Math.random() > 0.3,
-    rank: 500 + i // Ranks starting from 501 to ensure no overlap with existing events
+    importanceScore: Math.floor(Math.random() * 2000) + 1
   };
 
   mockNewsEvents.push(event);
@@ -786,13 +786,8 @@ for (let i = 0; i < 25; i++) {
     }
   }
 
-  // Generate rank ensuring some overlap with important events but mostly higher ranks
-  const rank = Math.random() < 0.2 ? // 20% chance for important event
-    Math.floor(Math.random() * 20) + 1 : // Rank 1-20
-    Math.floor(Math.random() * 480) + 21; // Rank 21-500
-
   const event = {
-    id: `stockholm-${(i + 1).toString().padStart(3, '0')}`,
+    id: generateUniqueEventId('stockholm'),
     timestamp: timestamp.toISOString(),
     title: generateStockholmTitle(),
     coordinates: [lat, lng],
@@ -803,7 +798,7 @@ for (let i = 0; i < 25; i++) {
     severity: Math.random() < 0.3 ? 'high' : 
              Math.random() < 0.7 ? 'medium' : 'low',
     verified: Math.random() > 0.2, // 80% chance of being verified
-    rank: rank
+    importanceScore: Math.floor(Math.random() * 2000) + 1
   };
 
   mockNewsEvents.push(event);
@@ -930,8 +925,181 @@ function ZoomDebugger() {
   );
 }
 
+// Define major urban centers across continents
+const URBAN_CENTERS = {
+  'North America': [
+    { name: 'New York', coords: [40.7128, -74.0060] },
+    { name: 'Los Angeles', coords: [34.0522, -118.2437] },
+    { name: 'Chicago', coords: [41.8781, -87.6298] },
+    { name: 'Toronto', coords: [43.6532, -79.3832] },
+    { name: 'Mexico City', coords: [19.4326, -99.1332] }
+  ],
+  'South America': [
+    { name: 'São Paulo', coords: [-23.5505, -46.6333] },
+    { name: 'Buenos Aires', coords: [-34.6037, -58.3816] },
+    { name: 'Lima', coords: [-12.0464, -77.0428] },
+    { name: 'Bogotá', coords: [4.7110, -74.0721] },
+    { name: 'Santiago', coords: [-33.4489, -70.6693] }
+  ],
+  'Europe': [
+    { name: 'London', coords: [51.5074, -0.1278] },
+    { name: 'Paris', coords: [48.8566, 2.3522] },
+    { name: 'Berlin', coords: [52.5200, 13.4050] },
+    { name: 'Rome', coords: [41.9028, 12.4964] },
+    { name: 'Madrid', coords: [40.4168, -3.7038] },
+    { name: 'Moscow', coords: [55.7558, 37.6173] }
+  ],
+  'Africa': [
+    { name: 'Cairo', coords: [30.0444, 31.2357] },
+    { name: 'Lagos', coords: [6.5244, 3.3792] },
+    { name: 'Johannesburg', coords: [-26.2041, 28.0473] },
+    { name: 'Nairobi', coords: [-1.2921, 36.8219] },
+    { name: 'Casablanca', coords: [33.5731, -7.5898] }
+  ],
+  'Asia': [
+    { name: 'Tokyo', coords: [35.6762, 139.6503] },
+    { name: 'Shanghai', coords: [31.2304, 121.4737] },
+    { name: 'Mumbai', coords: [19.0760, 72.8777] },
+    { name: 'Seoul', coords: [37.5665, 126.9780] },
+    { name: 'Singapore', coords: [1.3521, 103.8198] },
+    { name: 'Dubai', coords: [25.2048, 55.2708] },
+    { name: 'Bangkok', coords: [13.7563, 100.5018] }
+  ],
+  'Australia/Oceania': [
+    { name: 'Sydney', coords: [-33.8688, 151.2093] },
+    { name: 'Melbourne', coords: [-37.8136, 144.9631] },
+    { name: 'Brisbane', coords: [-27.4705, 153.0260] },
+    { name: 'Auckland', coords: [-36.8509, 174.7645] },
+    { name: 'Perth', coords: [-31.9505, 115.8605] }
+  ]
+};
+
+// Helper function to get a random item from an array
+const getRandomItem = (array) => array[Math.floor(Math.random() * array.length)];
+
+// Helper function to get random coordinates near a center point
+const getNearbyCoordinates = (center, radius = 0.5) => {
+  const [lat, lng] = center;
+  return [
+    lat + (Math.random() * 2 - 1) * radius,
+    lng + (Math.random() * 2 - 1) * radius
+  ];
+};
+
+// Generate event titles based on urban context
+const generateUrbanEventTitle = (city) => {
+  const eventTypes = [
+    'Tech Conference', 'Cultural Festival', 'Sports Tournament',
+    'Business Summit', 'Art Exhibition', 'Music Festival',
+    'Food Fair', 'Innovation Workshop', 'Urban Development',
+    'Environmental Initiative'
+  ];
+  const descriptors = [
+    'International', 'Annual', 'Groundbreaking', 'Historic',
+    'Modern', 'Revolutionary', 'Traditional', 'Contemporary',
+    'Innovative', 'Sustainable'
+  ];
+  return `${getRandomItem(descriptors)} ${getRandomItem(eventTypes)} in ${city}`;
+};
+
+// Generate descriptions based on category and city
+const generateUrbanDescription = (category, city) => {
+  const descriptions = {
+    technology: [
+      `New tech hub launches in ${city}'s innovation district`,
+      `Startup ecosystem expands with major investment in ${city}`,
+      `Smart city initiative transforms ${city}'s infrastructure`,
+      `Tech talent surge drives growth in ${city}`,
+      `Innovation center opens doors to entrepreneurs in ${city}`
+    ],
+    culture: [
+      `Cultural heritage celebration brings communities together in ${city}`,
+      `Art scene flourishes with new gallery openings in ${city}`,
+      `Traditional meets modern in ${city}'s latest cultural showcase`,
+      `Festival season kicks off with record attendance in ${city}`,
+      `Local artists gain international recognition in ${city}`
+    ],
+    business: [
+      `Economic growth accelerates with new investments in ${city}`,
+      `Business district expansion creates opportunities in ${city}`,
+      `International trade hub establishes presence in ${city}`,
+      `Market dynamics shift as ${city} attracts global players`,
+      `Entrepreneurial spirit drives innovation in ${city}`
+    ],
+    environment: [
+      `Green initiative transforms urban spaces in ${city}`,
+      `Sustainable development project launches in ${city}`,
+      `Environmental protection measures enhanced in ${city}`,
+      `Climate action plan gains momentum in ${city}`,
+      `Renewable energy adoption increases in ${city}`
+    ]
+  };
+  
+  const categoryDescriptions = descriptions[category] || descriptions.business;
+  return getRandomItem(categoryDescriptions);
+};
+
+// Generate 999 events spread across urban centers
+const generateUrbanEvents = (count) => {
+  const events = [];
+  const eventCategories = ['technology', 'politics', 'economy', 'environment'];
+  const sources = [
+    'Urban Times', 'City Post', 'Metro News', 'Global Herald',
+    'Regional Report', 'City Pulse', 'Urban Observer'
+  ];
+  const severities = ['low', 'medium', 'high'];
+
+  // Get all cities in a flat array
+  const allCities = Object.values(URBAN_CENTERS).flat();
+  
+  for (let i = 0; i < count; i++) {
+    const city = allCities[i % allCities.length];
+    const category = getRandomItem(eventCategories);
+    const daysAgo = Math.floor(Math.random() * 30);
+    const hoursAgo = Math.floor(Math.random() * 24);
+    
+    const timestamp = new Date();
+    timestamp.setDate(timestamp.getDate() - daysAgo);
+    timestamp.setHours(timestamp.getHours() - hoursAgo);
+
+    const event = {
+      id: generateUniqueEventId('urban'),
+      timestamp: timestamp.toISOString(),
+      title: generateUrbanEventTitle(city.name),
+      coordinates: getNearbyCoordinates(city.coords),
+      description: generateUrbanDescription(category, city.name),
+      source: getRandomItem(sources),
+      category,
+      tags: [city.name.toLowerCase(), category, 'urban'],
+      severity: getRandomItem(severities),
+      verified: Math.random() > 0.3,
+      importanceScore: Math.floor(Math.random() * 2000) + 1
+    };
+
+    events.push(event);
+  }
+
+  return events;
+};
+
+// Generate and add 999 urban events
+const urbanEvents = generateUrbanEvents(999);
+mockNewsEvents.push(...urbanEvents);
+
 function App() {
-  const [events] = useState(mockNewsEvents);
+  // Initialize events with ranks based on scores
+  const [events, setEvents] = useState(() => {
+    // Calculate initial ranks based on importance scores
+    const initialRanks = calculateEventRanks(mockNewsEvents);
+    
+    // Return events with ranks assigned
+    return mockNewsEvents.map(event => ({
+      ...event,
+      rank: initialRanks[event.id],
+      currentScore: event.importanceScore
+    }));
+  });
+
   const [activeFilters, setActiveFilters] = useState({
     categories: [],
     severities: [],
@@ -943,45 +1111,176 @@ function App() {
   const [topVisibleCount, setTopVisibleCount] = useState(DEFAULT_VISIBLE_EVENTS);
   const [selectedEvent, setSelectedEvent] = useState(null);
 
-  // Handle filter changes
-  const handleFilterChange = (filterType, value, isActive) => {
-    setActiveFilters(prev => {
-      if (filterType === 'verified') {
-        return { ...prev, verified: isActive };
-      }
-      
-      const filterArray = prev[filterType];
-      const updatedFilters = isActive
-        ? [...filterArray, value]
-        : filterArray.filter(item => item !== value);
-      
-      return {
-        ...prev,
-        [filterType]: updatedFilters
-      };
-    });
-  };
+  // Add state for likes and comments
+  const [eventLikes, setEventLikes] = useState({});  // { eventId: likesCount }
+  const [eventComments, setEventComments] = useState({}); // { eventId: [{ text, timestamp }] }
 
-  // Apply filters to events
+  // Add state for event scores
+  const [eventScores, setEventScores] = useState(
+    Object.fromEntries(events.map(event => [event.id, event.currentScore]))
+  );
+
+  // Score management handlers
+  const updateEventScore = useCallback((eventId, scoreChange) => {
+    setEventScores(prev => {
+      const newScores = {
+        ...prev,
+        [eventId]: Math.max(SCORE_CONFIG.MIN_SCORE, (prev[eventId] || 0) + scoreChange)
+      };
+      
+      // Calculate new ranks based on updated scores
+      const updatedRanks = calculateEventRanks(
+        events.map(event => ({
+          ...event,
+          currentScore: newScores[event.id] || event.currentScore
+        }))
+      );
+      
+      // Update events with new ranks
+      setEvents(prevEvents => 
+        prevEvents.map(event => ({
+          ...event,
+          rank: updatedRanks[event.id],
+          currentScore: newScores[event.id] || event.currentScore
+        }))
+      );
+      
+      return newScores;
+    });
+  }, [events]);
+
+  // Handle hover start
+  const handleEventHover = useCallback((eventId) => {
+    updateEventScore(eventId, SCORE_CONFIG.HOVER_BONUS);
+  }, [updateEventScore]);
+
+  // Handle event click
+  const handleEventClick = useCallback((event) => {
+    updateEventScore(event.id, SCORE_CONFIG.CLICK_BONUS);
+    setSelectedEvent(event);
+  }, [updateEventScore]);
+
+  // Modified like handler
+  const handleEventLike = useCallback((eventId) => {
+    setEventLikes(prev => ({
+      ...prev,
+      [eventId]: (prev[eventId] || 0) + 1
+    }));
+    updateEventScore(eventId, SCORE_CONFIG.LIKE_BONUS);
+  }, [updateEventScore]);
+
+  // Modified comment handler
+  const handleEventComment = useCallback((eventId, commentText) => {
+    const timestamp = new Date();
+    const formattedTime = `${timestamp.getHours().toString().padStart(2, '0')}:${timestamp.getMinutes().toString().padStart(2, '0')} - ${timestamp.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
+    
+    const newComment = {
+      text: commentText,
+      timestamp: formattedTime
+    };
+
+    setEventComments(prev => ({
+      ...prev,
+      [eventId]: [...(prev[eventId] || []), newComment]
+    }));
+    updateEventScore(eventId, SCORE_CONFIG.COMMENT_BONUS);
+  }, [updateEventScore]);
+
+  // Score decay effect
+  useEffect(() => {
+    const decayInterval = setInterval(() => {
+      setEventScores(prev => {
+        const newScores = { ...prev };
+        Object.keys(newScores).forEach(eventId => {
+          newScores[eventId] = Math.max(
+            SCORE_CONFIG.MIN_SCORE,
+            newScores[eventId] - SCORE_CONFIG.DECAY_AMOUNT
+          );
+        });
+        
+        // Calculate new ranks after decay
+        const updatedRanks = calculateEventRanks(
+          events.map(event => ({
+            ...event,
+            currentScore: newScores[event.id] || event.currentScore
+          }))
+        );
+        
+        // Update events with new ranks
+        setEvents(prevEvents => 
+          prevEvents.map(event => ({
+            ...event,
+            rank: updatedRanks[event.id],
+            currentScore: newScores[event.id] || event.currentScore
+          }))
+        );
+        
+        return newScores;
+      });
+    }, SCORE_CONFIG.DECAY_INTERVAL);
+
+    return () => clearInterval(decayInterval);
+  }, [events]);
+
+  // Memoize filter change handler
+  const handleFilterChange = useCallback((newFilters) => {
+    setActiveFilters(newFilters);
+  }, []);
+
+  // Memoize time range change handler
+  const handleTimeRangeChange = useCallback((newTimeRange) => {
+    setActiveTimeRange(newTimeRange);
+  }, []);
+
+  // Memoize top visible count change handler
+  const handleTopVisibleCountChange = useCallback((newCount) => {
+    setTopVisibleCount(newCount);
+  }, []);
+
+  // Memoize event selection handler
+  const handleEventSelect = useCallback((event) => {
+    setSelectedEvent(event);
+  }, []);
+
+  // Memoize event deselection handler
+  const handleEventDeselect = useCallback(() => {
+    setSelectedEvent(null);
+  }, []);
+
+  // Modify the filtered events to include current scores
   const filteredEvents = useMemo(() => {
     return events.filter(event => {
-      const categoryMatch = activeFilters.categories.length === 0 || 
-        activeFilters.categories.includes(event.category);
+      // Category filter
+      if (activeFilters.categories.length > 0 && 
+          !activeFilters.categories.includes(event.category)) {
+        return false;
+      }
       
-      const severityMatch = activeFilters.severities.length === 0 || 
-        activeFilters.severities.includes(event.severity);
+      // Severity filter
+      if (activeFilters.severities.length > 0 && 
+          !activeFilters.severities.includes(event.severity)) {
+        return false;
+      }
       
-      const verifiedMatch = !activeFilters.verified || event.verified;
-
-      let timeMatch = true;
-      if (activeTimeRange) {
-        const eventDate = new Date(event.timestamp);
-        timeMatch = eventDate >= activeTimeRange.start && eventDate <= activeTimeRange.end;
+      // Verification filter
+      if (activeFilters.verified && !event.verified) {
+        return false;
       }
 
-      return categoryMatch && severityMatch && verifiedMatch && timeMatch;
-    });
-  }, [events, activeFilters, activeTimeRange]);
+      // Time range filter
+      if (activeTimeRange) {
+        const eventDate = new Date(event.timestamp);
+        if (eventDate < activeTimeRange.start || eventDate > activeTimeRange.end) {
+          return false;
+        }
+      }
+
+      return true;
+    }).map(event => ({
+      ...event,
+      currentScore: eventScores[event.id] || event.currentScore
+    }));
+  }, [events, activeFilters, activeTimeRange, eventScores]);
 
   return (
     <div className="app">
@@ -995,9 +1294,9 @@ function App() {
           activeFilters={activeFilters}
           onFilterChange={handleFilterChange}
           activeTimeRange={activeTimeRange}
-          onTimeRangeChange={setActiveTimeRange}
+          onTimeRangeChange={handleTimeRangeChange}
           topVisibleCount={topVisibleCount}
-          onTopVisibleCountChange={setTopVisibleCount}
+          onTopVisibleCountChange={handleTopVisibleCountChange}
         />
         <div className="map-wrapper">
           <MapContainer
@@ -1023,14 +1322,16 @@ function App() {
               <HiddenEventIndicator 
                 key={`hidden-${event.id}`}
                 event={event}
-                onClick={setSelectedEvent}
+                onClick={handleEventClick}
+                onHoverStart={() => handleEventHover(event.id)}
               />
             ))}
             {visibleEvents.map(event => (
               <EventMarker 
                 key={event.id}
                 event={event}
-                onClick={setSelectedEvent}
+                onClick={handleEventClick}
+                onHoverStart={() => handleEventHover(event.id)}
               />
             ))}
           </MapContainer>
@@ -1039,7 +1340,12 @@ function App() {
       {selectedEvent && (
         <EventModal 
           event={selectedEvent}
-          onClose={() => setSelectedEvent(null)}
+          onClose={handleEventDeselect}
+          likes={eventLikes[selectedEvent.id] || 0}
+          comments={eventComments[selectedEvent.id] || []}
+          onLike={() => handleEventLike(selectedEvent.id)}
+          onComment={(text) => handleEventComment(selectedEvent.id, text)}
+          score={eventScores[selectedEvent.id] || selectedEvent.currentScore}
         />
       )}
     </div>

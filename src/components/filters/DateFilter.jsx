@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 
+// Time range presets
 const TIME_PRESETS = {
   '24h': {
     label: 'Last 24 hours',
@@ -48,6 +49,7 @@ function DateFilter({ activeTimeRange, onTimeRangeChange }) {
     };
     setCustomRange(newRange);
 
+    // Only update if both dates are set
     if (newRange.start && newRange.end) {
       onTimeRangeChange({
         preset: null,
@@ -93,4 +95,4 @@ function DateFilter({ activeTimeRange, onTimeRangeChange }) {
   );
 }
 
-export default DateFilter; 
+export default React.memo(DateFilter); 

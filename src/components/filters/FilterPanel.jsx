@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useMemo, useCallback } from 'react';
+import DateFilter from './DateFilter.jsx';
 import './FilterPanel.css';
 
 function FilterPanel({
@@ -10,112 +11,128 @@ function FilterPanel({
   topVisibleCount = 300,
   onTopVisibleCountChange = () => {}
 }) {
-  const categories = [...new Set(events.map(event => event.category))];
-  const severities = [...new Set(events.map(event => event.severity))].sort();
+  // Memoize unique categories and severities
+  const { categories, severities } = useMemo(() => {
+    return {
+      categories: [...new Set(events.map(event => event.category))],
+      severities: [...new Set(events.map(event => event.severity))].sort()
+    };
+  }, [events]);
 
-  const handleCategoryChange = (category) => {
-    const newCategories = (activeFilters.categories || []).includes(category)
-      ? (activeFilters.categories || []).filter(c => c !== category)
-      : [...(activeFilters.categories || []), category];
+  // Memoize event handlers
+  const handleCategoryChange = useCallback((category) => {
+    const newCategories = activeFilters.categories.includes(category)
+      ? activeFilters.categories.filter(c => c !== category)
+      : [...activeFilters.categories, category];
     
     onFilterChange({
       ...activeFilters,
       categories: newCategories
     });
-  };
+  }, [activeFilters, onFilterChange]);
 
-  const handleSeverityChange = (severity) => {
-    const newSeverities = (activeFilters.severities || []).includes(severity)
-      ? (activeFilters.severities || []).filter(s => s !== severity)
-      : [...(activeFilters.severities || []), severity];
+  const handleSeverityChange = useCallback((severity) => {
+    const newSeverities = activeFilters.severities.includes(severity)
+      ? activeFilters.severities.filter(s => s !== severity)
+      : [...activeFilters.severities, severity];
     
     onFilterChange({
       ...activeFilters,
       severities: newSeverities
     });
-  };
+  }, [activeFilters, onFilterChange]);
 
-  const handleVerificationChange = (status) => {
+  const handleVerifiedChange = useCallback((e) => {
     onFilterChange({
       ...activeFilters,
-      verified: status === 'verified'
+      verified: e.target.checked
     });
-  };
+  }, [activeFilters, onFilterChange]);
+
+  const handleTopVisibleCountChange = useCallback((e) => {
+    const value = parseInt(e.target.value, 10);
+    if (!isNaN(value) && value >= 5 && value <= 300) {
+      onTopVisibleCountChange(value);
+    }
+  }, [onTopVisibleCountChange]);
+
+  // Memoize filter sections
+  const categoryFilters = useMemo(() => (
+    <div className="filter-section">
+      <h3>Categories</h3>
+      {categories.map(category => (
+        <label key={category} className="filter-option">
+          <input
+            type="checkbox"
+            checked={activeFilters.categories.includes(category)}
+            onChange={() => handleCategoryChange(category)}
+          />
+          {category}
+        </label>
+      ))}
+    </div>
+  ), [categories, activeFilters.categories, handleCategoryChange]);
+
+  const severityFilters = useMemo(() => (
+    <div className="filter-section">
+      <h3>Severity</h3>
+      {severities.map(severity => (
+        <label key={severity} className="filter-option">
+          <input
+            type="checkbox"
+            checked={activeFilters.severities.includes(severity)}
+            onChange={() => handleSeverityChange(severity)}
+          />
+          {severity}
+        </label>
+      ))}
+    </div>
+  ), [severities, activeFilters.severities, handleSeverityChange]);
+
+  const verifiedFilter = useMemo(() => (
+    <div className="filter-section">
+      <h3>Verification</h3>
+      <label className="filter-option">
+        <input
+          type="checkbox"
+          checked={activeFilters.verified}
+          onChange={handleVerifiedChange}
+        />
+        Show only verified events
+      </label>
+    </div>
+  ), [activeFilters.verified, handleVerifiedChange]);
+
+  const visibilityControl = useMemo(() => (
+    <div className="filter-section">
+      <h3>Visibility Control</h3>
+      <div className="visibility-slider">
+        <label>
+          Maximum visible events: {topVisibleCount}
+          <input
+            type="range"
+            min="5"
+            max="300"
+            value={topVisibleCount}
+            onChange={handleTopVisibleCountChange}
+          />
+        </label>
+      </div>
+    </div>
+  ), [topVisibleCount, handleTopVisibleCountChange]);
 
   return (
     <div className="filter-panel">
-      <h2>Filters</h2>
-      
-      <section className="filter-section">
-        <h3>Categories</h3>
-        <div className="filter-options">
-          {categories.map(category => (
-            <label key={category} className="filter-option">
-              <input
-                type="checkbox"
-                checked={(activeFilters.categories || []).includes(category)}
-                onChange={() => handleCategoryChange(category)}
-              />
-              {category.charAt(0).toUpperCase() + category.slice(1)}
-            </label>
-          ))}
-        </div>
-      </section>
-
-      <section className="filter-section">
-        <h3>Severity</h3>
-        <div className="filter-options">
-          {severities.map(level => (
-            <label key={level} className="filter-option">
-              <input
-                type="checkbox"
-                checked={(activeFilters.severities || []).includes(level)}
-                onChange={() => handleSeverityChange(level)}
-              />
-              Level {level}
-            </label>
-          ))}
-        </div>
-      </section>
-
-      <section className="filter-section">
-        <h3>Status</h3>
-        <label className="filter-option">
-          <input
-            type="radio"
-            name="verification"
-            checked={!activeFilters.verified}
-            onChange={() => handleVerificationChange('all')}
-          />
-          All
-        </label>
-        <label className="filter-option">
-          <input
-            type="radio"
-            name="verification"
-            checked={activeFilters.verified}
-            onChange={() => handleVerificationChange('verified')}
-          />
-          Verified Only
-        </label>
-      </section>
-
-      <section className="filter-section">
-        <h3>Visible Events</h3>
-        <div className="range-input">
-          <input
-            type="range"
-            min="50"
-            max="500"
-            step="50"
-            value={topVisibleCount}
-            onChange={(e) => onTopVisibleCountChange(Number(e.target.value))}
-          />
-          <span>{topVisibleCount} events</span>
-        </div>
-      </section>
+      {categoryFilters}
+      {severityFilters}
+      {verifiedFilter}
+      {visibilityControl}
+      <DateFilter
+        activeTimeRange={activeTimeRange}
+        onTimeRangeChange={onTimeRangeChange}
+      />
     </div>
   );
 }
 
-export default FilterPanel; 
+export default React.memo(FilterPanel); 

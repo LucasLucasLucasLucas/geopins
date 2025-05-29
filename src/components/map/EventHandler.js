@@ -4,6 +4,7 @@ import L from 'leaflet';
 import { getPixelDistance, MIN_PIXEL_DISTANCE } from '../../utils/mapUtils';
 import { getMarkerFootprint } from '../markers/MarkerIcon';
 import { processEvents } from '../../services/eventService';
+import { checkMarkersCollision, determineEventTier } from '../../utils/eventUtils';
 
 // Create spatial index for efficient collision detection
 const createSpatialIndex = (map, events, zoom) => {
@@ -78,26 +79,6 @@ const checkSimpleCollision = (event1, event2, map, zoom) => {
   );
   const minDistance = MIN_PIXEL_DISTANCE * (zoom <= 4 ? 0.7 : zoom <= 8 ? 0.85 : 1);
   return distance < minDistance;
-};
-
-// Determine event tier based on rank and viewport
-const determineEventTier = (event, visibleEvents, currentlyVisibleArea = null) => {
-  if (event.rank <= 5) return 'top';
-
-  if (currentlyVisibleArea && visibleEvents.length > 0) {
-    const eventsInView = visibleEvents.filter(e => 
-      currentlyVisibleArea.contains(L.latLng(e.coordinates))
-    );
-
-    const localTop10 = eventsInView
-      .sort((a, b) => a.rank - b.rank)
-      .slice(0, 10)
-      .map(e => e.id);
-
-    if (localTop10.includes(event.id)) return 'high';
-  }
-
-  return 'normal';
 };
 
 // Main event handler component
