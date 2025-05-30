@@ -237,17 +237,38 @@ export const calculateEventRanks = (events) => {
 
 /**
  * Determines the size tier of an event based on its rank.
- * @param {number} rank - The event's rank
+ * If visibleEvents is provided, determines tier based on local ranking within visible events.
+ * Otherwise, uses global rank.
+ * @param {Object} event - The event object with rank property
+ * @param {Array} [visibleEvents] - Optional array of currently visible events
  * @returns {'top' | 'high' | 'normal'} The size tier
  */
-export const determineEventTier = (event) => {
-  const rank = event.rank;
-  
-  if (rank <= 5) {
-    return 'top';     // Ranks 1-5 get largest markers
-  } else if (rank <= 20) {
-    return 'high';    // Ranks 6-20 get medium markers
-  } else {
-    return 'normal';  // Ranks >20 get default (small) size
+export const determineEventTier = (event, visibleEvents = null) => {
+  // If no visible events provided, use global ranking
+  if (!visibleEvents) {
+    if (event.rank <= 5) {
+      return 'top';     // Global ranks 1-5 get largest markers
+    } else if (event.rank <= 20) {
+      return 'high';    // Global ranks 6-20 get medium markers
+    } else {
+      return 'normal';  // Global ranks >20 get default (small) size
+    }
   }
+
+  // For local ranking, sort visible events by their global rank
+  const sortedVisible = [...visibleEvents].sort((a, b) => a.rank - b.rank);
+  
+  // Find this event's position in the visible set
+  const localRank = sortedVisible.findIndex(e => e.id === event.id) + 1;
+  
+  // Apply local ranking tiers
+  if (localRank > 0) { // Only if event is in the visible set
+    if (localRank <= 5) {
+      return 'top';     // Local top 5 get largest markers
+    } else if (localRank <= 20) {
+      return 'high';    // Local 6-20 get medium markers
+    }
+  }
+  
+  return 'normal';      // All others get default size
 }; 

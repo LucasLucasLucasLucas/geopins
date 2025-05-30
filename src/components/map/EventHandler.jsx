@@ -43,13 +43,18 @@ function EventHandler({ events, setVisibleEvents, setHiddenEvents, topVisibleCou
       // This helps us determine local importance before final placement
       const preliminaryVisible = rankedEvents.slice(0, topVisibleCount).map(event => ({
         ...event,
-        sizeTier: determineEventTier(event, rankedEvents, bounds)
+        // Initially use global ranking since we don't have visible events yet
+        sizeTier: determineEventTier(event)
       }));
 
       // Second pass: Apply collision detection with finalized size tiers
       for (const event of preliminaryVisible) {
         if (visibleEvents.length >= topVisibleCount) {
-          hiddenEvents.push(event);
+          // For hidden events, use global ranking
+          hiddenEvents.push({
+            ...event,
+            sizeTier: determineEventTier(event)
+          });
           continue;
         }
 
@@ -77,11 +82,17 @@ function EventHandler({ events, setVisibleEvents, setHiddenEvents, topVisibleCou
             if (placedEvent.rank > event.rank) {
               // Remove the placed event and add this one
               visibleEvents.splice(visibleEvents.indexOf(placedEvent), 1);
-              hiddenEvents.push(placedEvent);
+              hiddenEvents.push({
+                ...placedEvent,
+                sizeTier: determineEventTier(placedEvent)
+              });
               
               visibleEvents.push(event);
             } else {
-              hiddenEvents.push(event);
+              hiddenEvents.push({
+                ...event,
+                sizeTier: determineEventTier(event)
+              });
             }
             hasCollision = true;
             break;
@@ -96,7 +107,8 @@ function EventHandler({ events, setVisibleEvents, setHiddenEvents, topVisibleCou
       // Final pass: Update size tiers based on final visible set
       const finalVisibleEvents = visibleEvents.map(event => ({
         ...event,
-        sizeTier: determineEventTier(event, visibleEvents, bounds)
+        // Now use local ranking with the final set of visible events
+        sizeTier: determineEventTier(event, visibleEvents)
       }));
 
       setVisibleEvents(finalVisibleEvents);
