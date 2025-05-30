@@ -1,3 +1,6 @@
+// Debug configuration
+const DEBUG_MODE = false; // Set to true if debugging is needed
+
 import { MIN_TOP_EVENTS, MAX_TOP_EVENTS } from './mapUtils';
 import L from 'leaflet';
 
@@ -200,67 +203,51 @@ export const checkMarkersCollision = (event1, event2, map, currentZoom) => {
 
 /**
  * Calculates ranks for events based on their scores.
- * Events with equal scores share the same rank.
+ * Events with equal scores share the same rank (dense ranking: 1, 2, 2, 4).
  * Higher scores get lower rank numbers (rank 1 is best).
- * @param {Array} events - Array of events with scores
+ * @param {Array} events - Array of objects with id and score properties
  * @returns {Object} Map of event IDs to their ranks
  */
 export const calculateEventRanks = (events) => {
   // Sort events by score in descending order
-  const sortedEvents = [...events].sort((a, b) => {
-    const scoreA = b.currentScore || b.importanceScore || 0;
-    const scoreB = a.currentScore || a.importanceScore || 0;
-    return scoreA - scoreB;
-  });
-
-  // Calculate ranks (equal scores get equal ranks)
+  const sorted = [...events].sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
   const ranks = {};
-  let currentRank = 1;
+  let rank = 1;
   let prevScore = null;
 
-  sortedEvents.forEach((event, index) => {
-    const score = event.currentScore || event.importanceScore || 0;
-    
-    // If score is different from previous, increment rank
-    if (prevScore !== null && score !== prevScore) {
-      currentRank = index + 1;
+  for (let i = 0; i < sorted.length; i++) {
+    const { id, score } = sorted[i];
+    if (prevScore !== null && score < prevScore) {
+      rank = i + 1;
     }
-    
-    ranks[event.id] = currentRank;
+    ranks[id] = rank;
     prevScore = score;
-  });
+  }
+
+  // Debug logging - only runs if DEBUG_MODE is true
+  if (DEBUG_MODE) {
+    console.log('Updated Ranks (Top 10):');
+    sorted.slice(0, 10).forEach(event =>
+      console.log(`#${ranks[event.id]} - ID: ${event.id} - Score: ${event.score}`)
+    );
+  }
 
   return ranks;
 };
 
-// Update the tier determination to use score-based ranks
-export const determineEventTier = (event, visibleEvents, currentlyVisibleArea = null) => {
-  // Get current ranks for visible events
-  const ranks = calculateEventRanks(visibleEvents);
-  const eventRank = ranks[event.id];
-
-  // Global top 5 always get top tier regardless of viewport
-  if (eventRank <= 5) {
-    return 'top';
+/**
+ * Determines the size tier of an event based on its rank.
+ * @param {number} rank - The event's rank
+ * @returns {'top' | 'high' | 'normal'} The size tier
+ */
+export const determineEventTier = (event) => {
+  const rank = event.rank;
+  
+  if (rank <= 5) {
+    return 'top';     // Ranks 1-5 get largest markers
+  } else if (rank <= 20) {
+    return 'high';    // Ranks 6-20 get medium markers
+  } else {
+    return 'normal';  // Ranks >20 get default (small) size
   }
-
-  // If we have visible area context, check for local importance
-  if (currentlyVisibleArea && visibleEvents.length > 0) {
-    // Get events that are actually in the current viewport
-    const eventsInView = visibleEvents.filter(e => 
-      currentlyVisibleArea.contains(L.latLng(e.coordinates))
-    );
-
-    // Calculate ranks for events in view
-    const localRanks = calculateEventRanks(eventsInView);
-    const localRank = localRanks[event.id];
-
-    // If this event is in local top 10, it gets high tier
-    if (localRank && localRank <= 10) {
-      return 'high';
-    }
-  }
-
-  // Default to normal tier
-  return 'normal';
 }; 

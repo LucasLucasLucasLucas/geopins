@@ -1092,9 +1092,17 @@ function App() {
   const [authenticated, setAuthenticated] = useState(false);
   const [pincode, setPincode] = useState('');
 
+  // Add scoresRef to track live scores
+  const scoresRef = useRef({});
+
   // Initialize events with ranks based on scores
   const [events, setEvents] = useState(() => {
-    const initialRanks = calculateEventRanks(mockNewsEvents);
+    const initialRanks = calculateEventRanks(
+      mockNewsEvents.map(event => ({
+        id: event.id,
+        score: event.importanceScore
+      }))
+    );
     return mockNewsEvents.map(event => ({
       ...event,
       rank: initialRanks[event.id],
@@ -1186,7 +1194,12 @@ function App() {
     setSelectedEvent(null);
   }, []);
 
-  // Score decay effect
+  // Keep scoresRef in sync with eventScores
+  useEffect(() => {
+    scoresRef.current = eventScores;
+  }, [eventScores]);
+
+  // Score decay effect - only updates scores, not ranks
   useEffect(() => {
     const decayInterval = setInterval(() => {
       setEventScores(prev => {
@@ -1204,27 +1217,27 @@ function App() {
     return () => clearInterval(decayInterval);
   }, []);
 
-  // Rank update effect
+  // Rank update effect - runs every 60 seconds
   useEffect(() => {
-    const rankUpdateInterval = setInterval(() => {
+    const updateRanks = () => {
+      const scores = scoresRef.current;
       setEvents(prevEvents => {
-        const updatedRanks = calculateEventRanks(
-          prevEvents.map(event => ({
-            ...event,
-            currentScore: eventScores[event.id] || event.currentScore
-          }))
-        );
-        
+        const eventsWithScores = prevEvents.map(event => ({
+          id: event.id,
+          score: scores[event.id] ?? event.importanceScore ?? 0
+        }));
+        const newRanks = calculateEventRanks(eventsWithScores);
         return prevEvents.map(event => ({
           ...event,
-          rank: updatedRanks[event.id],
-          currentScore: eventScores[event.id] || event.currentScore
+          rank: newRanks[event.id]
         }));
       });
-    }, SCORE_CONFIG.RANK_UPDATE_INTERVAL);
+    };
 
-    return () => clearInterval(rankUpdateInterval);
-  }, [eventScores]);
+    updateRanks(); // Initial run
+    const interval = setInterval(updateRanks, 60000); // Run every 60s
+    return () => clearInterval(interval);
+  }, []); // No dependencies needed
 
   // Filtered events computation
   const filteredEvents = useMemo(() => {
