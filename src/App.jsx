@@ -458,7 +458,8 @@ const SCORE_CONFIG = {
   COMMENT_BONUS: 15,
   DECAY_INTERVAL: 10000, // 10 seconds
   DECAY_AMOUNT: 3,
-  MIN_SCORE: 0
+  MIN_SCORE: 0,
+  RANK_UPDATE_INTERVAL: 60000 // New constant for 1-minute rank updates
 };
 
 // Modify the event generation to remove static ranks
@@ -1087,12 +1088,13 @@ const urbanEvents = generateUrbanEvents(999);
 mockNewsEvents.push(...urbanEvents);
 
 function App() {
+  // Authentication state
+  const [authenticated, setAuthenticated] = useState(false);
+  const [pincode, setPincode] = useState('');
+
   // Initialize events with ranks based on scores
   const [events, setEvents] = useState(() => {
-    // Calculate initial ranks based on importance scores
     const initialRanks = calculateEventRanks(mockNewsEvents);
-    
-    // Return events with ranks assigned
     return mockNewsEvents.map(event => ({
       ...event,
       rank: initialRanks[event.id],
@@ -1100,6 +1102,7 @@ function App() {
     }));
   });
 
+  // Filter and view states
   const [activeFilters, setActiveFilters] = useState({
     categories: [],
     severities: [],
@@ -1111,56 +1114,33 @@ function App() {
   const [topVisibleCount, setTopVisibleCount] = useState(DEFAULT_VISIBLE_EVENTS);
   const [selectedEvent, setSelectedEvent] = useState(null);
 
-  // Add state for likes and comments
+  // Interaction states
   const [eventLikes, setEventLikes] = useState({});  // { eventId: likesCount }
   const [eventComments, setEventComments] = useState({}); // { eventId: [{ text, timestamp }] }
-
-  // Add state for event scores
   const [eventScores, setEventScores] = useState(
     Object.fromEntries(events.map(event => [event.id, event.currentScore]))
   );
 
-  // Score management handlers
+  // Score management callbacks
   const updateEventScore = useCallback((eventId, scoreChange) => {
     setEventScores(prev => {
       const newScores = {
         ...prev,
         [eventId]: Math.max(SCORE_CONFIG.MIN_SCORE, (prev[eventId] || 0) + scoreChange)
       };
-      
-      // Calculate new ranks based on updated scores
-      const updatedRanks = calculateEventRanks(
-        events.map(event => ({
-          ...event,
-          currentScore: newScores[event.id] || event.currentScore
-        }))
-      );
-      
-      // Update events with new ranks
-      setEvents(prevEvents => 
-        prevEvents.map(event => ({
-          ...event,
-          rank: updatedRanks[event.id],
-          currentScore: newScores[event.id] || event.currentScore
-        }))
-      );
-      
       return newScores;
     });
-  }, [events]);
+  }, []);
 
-  // Handle hover start
   const handleEventHover = useCallback((eventId) => {
     updateEventScore(eventId, SCORE_CONFIG.HOVER_BONUS);
   }, [updateEventScore]);
 
-  // Handle event click
   const handleEventClick = useCallback((event) => {
     updateEventScore(event.id, SCORE_CONFIG.CLICK_BONUS);
     setSelectedEvent(event);
   }, [updateEventScore]);
 
-  // Modified like handler
   const handleEventLike = useCallback((eventId) => {
     setEventLikes(prev => ({
       ...prev,
@@ -1169,7 +1149,6 @@ function App() {
     updateEventScore(eventId, SCORE_CONFIG.LIKE_BONUS);
   }, [updateEventScore]);
 
-  // Modified comment handler
   const handleEventComment = useCallback((eventId, commentText) => {
     const timestamp = new Date();
     const formattedTime = `${timestamp.getHours().toString().padStart(2, '0')}:${timestamp.getMinutes().toString().padStart(2, '0')} - ${timestamp.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
@@ -1186,6 +1165,27 @@ function App() {
     updateEventScore(eventId, SCORE_CONFIG.COMMENT_BONUS);
   }, [updateEventScore]);
 
+  // Filter and view management callbacks
+  const handleFilterChange = useCallback((newFilters) => {
+    setActiveFilters(newFilters);
+  }, []);
+
+  const handleTimeRangeChange = useCallback((newTimeRange) => {
+    setActiveTimeRange(newTimeRange);
+  }, []);
+
+  const handleTopVisibleCountChange = useCallback((newCount) => {
+    setTopVisibleCount(newCount);
+  }, []);
+
+  const handleEventSelect = useCallback((event) => {
+    setSelectedEvent(event);
+  }, []);
+
+  const handleEventDeselect = useCallback(() => {
+    setSelectedEvent(null);
+  }, []);
+
   // Score decay effect
   useEffect(() => {
     const decayInterval = setInterval(() => {
@@ -1197,77 +1197,52 @@ function App() {
             newScores[eventId] - SCORE_CONFIG.DECAY_AMOUNT
           );
         });
-        
-        // Calculate new ranks after decay
-        const updatedRanks = calculateEventRanks(
-          events.map(event => ({
-            ...event,
-            currentScore: newScores[event.id] || event.currentScore
-          }))
-        );
-        
-        // Update events with new ranks
-        setEvents(prevEvents => 
-          prevEvents.map(event => ({
-            ...event,
-            rank: updatedRanks[event.id],
-            currentScore: newScores[event.id] || event.currentScore
-          }))
-        );
-        
         return newScores;
       });
     }, SCORE_CONFIG.DECAY_INTERVAL);
 
     return () => clearInterval(decayInterval);
-  }, [events]);
-
-  // Memoize filter change handler
-  const handleFilterChange = useCallback((newFilters) => {
-    setActiveFilters(newFilters);
   }, []);
 
-  // Memoize time range change handler
-  const handleTimeRangeChange = useCallback((newTimeRange) => {
-    setActiveTimeRange(newTimeRange);
-  }, []);
+  // Rank update effect
+  useEffect(() => {
+    const rankUpdateInterval = setInterval(() => {
+      setEvents(prevEvents => {
+        const updatedRanks = calculateEventRanks(
+          prevEvents.map(event => ({
+            ...event,
+            currentScore: eventScores[event.id] || event.currentScore
+          }))
+        );
+        
+        return prevEvents.map(event => ({
+          ...event,
+          rank: updatedRanks[event.id],
+          currentScore: eventScores[event.id] || event.currentScore
+        }));
+      });
+    }, SCORE_CONFIG.RANK_UPDATE_INTERVAL);
 
-  // Memoize top visible count change handler
-  const handleTopVisibleCountChange = useCallback((newCount) => {
-    setTopVisibleCount(newCount);
-  }, []);
+    return () => clearInterval(rankUpdateInterval);
+  }, [eventScores]);
 
-  // Memoize event selection handler
-  const handleEventSelect = useCallback((event) => {
-    setSelectedEvent(event);
-  }, []);
-
-  // Memoize event deselection handler
-  const handleEventDeselect = useCallback(() => {
-    setSelectedEvent(null);
-  }, []);
-
-  // Modify the filtered events to include current scores
+  // Filtered events computation
   const filteredEvents = useMemo(() => {
     return events.filter(event => {
-      // Category filter
       if (activeFilters.categories.length > 0 && 
           !activeFilters.categories.includes(event.category)) {
         return false;
       }
       
-      // Severity filter
       if (activeFilters.severities.length > 0 && 
           !activeFilters.severities.includes(event.severity)) {
         return false;
       }
       
-      // Verification filter
       if (activeFilters.verified && !event.verified) {
         return false;
       }
 
-      // Time range filter
       if (activeTimeRange) {
         const eventDate = new Date(event.timestamp);
         if (eventDate < activeTimeRange.start || eventDate > activeTimeRange.end) {
@@ -1282,6 +1257,51 @@ function App() {
     }));
   }, [events, activeFilters, activeTimeRange, eventScores]);
 
+  const handlePincodeSubmit = (e) => {
+    e.preventDefault();
+    if (pincode === '1994') {
+      setAuthenticated(true);
+    }
+  };
+
+  // Early return for authentication screen
+  if (!authenticated) {
+    return (
+      <div className="pincode-screen">
+        <form onSubmit={handlePincodeSubmit} className="pincode-form">
+          <h2 style={{ marginBottom: '1rem' }}>Enter Pincode</h2>
+          <input
+            type="password"
+            value={pincode}
+            onChange={(e) => setPincode(e.target.value)}
+            style={{
+              padding: '0.5rem',
+              marginBottom: '1rem',
+              width: '200px',
+              border: '1px solid #ddd',
+              borderRadius: '4px'
+            }}
+          />
+          <br />
+          <button
+            type="submit"
+            style={{
+              padding: '0.5rem 1rem',
+              backgroundColor: '#007bff',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer'
+            }}
+          >
+            Submit
+          </button>
+        </form>
+      </div>
+    );
+  }
+
+  // Main app render
   return (
     <div className="app">
       <header className="header">
@@ -1298,13 +1318,14 @@ function App() {
           topVisibleCount={topVisibleCount}
           onTopVisibleCountChange={handleTopVisibleCountChange}
         />
-        <div className="map-wrapper">
+        <div className="map-wrapper" style={{ height: '100%', flex: 1 }}>
           <MapContainer
             center={[30, 45]}
             zoom={2}
             scrollWheelZoom={true}
             className="map-container"
             preferCanvas={true}
+            style={{ height: '100%', width: '100%' }}
           >
             <CustomPanes />
             <ZoomDebugger />

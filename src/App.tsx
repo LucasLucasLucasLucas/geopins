@@ -40,10 +40,57 @@ const SCORE_CONFIG = {
   COMMENT_BONUS: 15,
   DECAY_INTERVAL: 10000,
   DECAY_AMOUNT: 3,
-  MIN_SCORE: 0
+  MIN_SCORE: 0,
+  RANK_UPDATE_INTERVAL: 60000 // New constant for 1-minute rank updates
 };
 
 function App() {
+  const [authenticated, setAuthenticated] = useState(false);
+  const [pincode, setPincode] = useState('');
+
+  const handlePincodeSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (pincode === '1994') {
+      setAuthenticated(true);
+    }
+  };
+
+  if (!authenticated) {
+    return (
+      <div className="pincode-screen">
+        <form onSubmit={handlePincodeSubmit} className="pincode-form">
+          <h2 style={{ marginBottom: '1rem' }}>Enter Pincode</h2>
+          <input
+            type="password"
+            value={pincode}
+            onChange={(e) => setPincode(e.target.value)}
+            style={{
+              padding: '0.5rem',
+              marginBottom: '1rem',
+              width: '200px',
+              border: '1px solid #ddd',
+              borderRadius: '4px'
+            }}
+          />
+          <br />
+          <button
+            type="submit"
+            style={{
+              padding: '0.5rem 1rem',
+              backgroundColor: '#007bff',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer'
+            }}
+          >
+            Submit
+          </button>
+        </form>
+      </div>
+    );
+  }
+
   // Initialize events with ranks based on scores
   const [events, setEvents] = useState<Event[]>(() => {
     const initialEvents = generateMockEvents();
@@ -75,13 +122,7 @@ function App() {
           : event
       );
       
-      // Calculate new ranks based on updated scores
-      const updatedRanks = calculateEventRanks(updatedEvents);
-      
-      return updatedEvents.map(event => ({
-        ...event,
-        rank: updatedRanks[event.id]
-      }));
+      return updatedEvents;
     });
   }, []);
 
@@ -130,7 +171,7 @@ function App() {
     });
   }, [updateEventScore]);
 
-  // Score decay effect
+  // Score decay effect - now only updates scores, not ranks
   useEffect(() => {
     const decayInterval = setInterval(() => {
       setEvents(prevEvents => {
@@ -139,16 +180,27 @@ function App() {
           score: Math.max(SCORE_CONFIG.MIN_SCORE, event.score - SCORE_CONFIG.DECAY_AMOUNT)
         }));
         
-        const updatedRanks = calculateEventRanks(updatedEvents);
-        
-        return updatedEvents.map(event => ({
-          ...event,
-          rank: updatedRanks[event.id]
-        }));
+        return updatedEvents;
       });
     }, SCORE_CONFIG.DECAY_INTERVAL);
 
     return () => clearInterval(decayInterval);
+  }, []);
+
+  // New separate effect for rank updates every minute
+  useEffect(() => {
+    const rankUpdateInterval = setInterval(() => {
+      setEvents(prevEvents => {
+        const updatedRanks = calculateEventRanks(prevEvents);
+        
+        return prevEvents.map(event => ({
+          ...event,
+          rank: updatedRanks[event.id]
+        }));
+      });
+    }, SCORE_CONFIG.RANK_UPDATE_INTERVAL);
+
+    return () => clearInterval(rankUpdateInterval);
   }, []);
 
   // Memoize filter change handler
